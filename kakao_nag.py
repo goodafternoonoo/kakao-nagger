@@ -10,11 +10,13 @@
 채팅 목록에 보이는 줄만 읽으니, 창을 길게 두거나 '안읽음' 탭에 두면 빠짐없이 읽음.
 자동 답장은 하지 않고 평소엔 화면을 '읽기'만 함. 위젯에서 사람을 직접 누를 때만 그 채팅방을 엶(읽음 처리됨).
 Ctrl+Alt+K로 위젯을 완전히 숨기거나 다시 보임. '내대사.txt'에 쓴 대사는 말투 '내 대사'에서 나옴.
+설정의 '거르기'로 이름·메시지 문구에 따라 방을 숨기거나 그 방만 볼 수 있음. 메시지 문구를 넣었을 때만 미리보기를 글자로 읽음.
 """
-import sys, os, re, csv, json, time, random, shutil, sqlite3, struct, tempfile, subprocess, threading
+import sys, os, re, csv, json, math, time, random, shutil, sqlite3, struct, tempfile, subprocess, threading, winreg
 import ctypes
 from ctypes import wintypes as wt
 import tkinter as tk
+import tkinter.font
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -28,6 +30,7 @@ SNOOZE_MIN = 10       # 한 사람만 조용히 하는 시간(분)
 MAX_BUBBLES = 4
 PRAISE_SEC = 6        # 읽으면 칭찬을 띄워 두는 시간(초)
 MAX_PRAISE = 2        # 한꺼번에 읽었을 때 칭찬 줄 수
+UNDO_SEC = 8          # '안 보기'를 되돌릴 수 있게 띄워 두는 시간(초)
 HOTKEY_TEXT = "Ctrl+Alt+K"
 
 LEVEL_MIN = (0, 10, 60)   # 대사·말풍선 단계가 오르는 시간(분)
@@ -135,21 +138,100 @@ def open_custom():
 load_custom()
 
 
-def load_tone():
+def load_settings():
     try:
         with open(SETTINGS_PATH, encoding="utf-8") as f:
-            tone = json.load(f).get("tone")
-    except (OSError, ValueError, AttributeError):
-        return DEFAULT_TONE
-    return tone if tone in TONE_LINES else DEFAULT_TONE
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_settings(**changes):
+    data = load_settings()
+    data.update(changes)
+    try:
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except OSError:
+        pass  # 저장이 안 돼도 이번 실행에서는 적용됨
+
+
+def load_tone():
+    tone = load_settings().get("tone")
+    return tone if isinstance(tone, str) and tone in TONE_LINES else DEFAULT_TONE
 
 
 def save_tone(tone):
+    save_settings(tone=tone)
+
+
+# 거르기: 숨기기는 이름·메시지 중 하나만 걸려도 숨김. 이것만 보기는 하나라도 있으면 맞는 방만 보임. 숨기기가 먼저.
+FILTER_KEYS = ("hide_name", "hide_text", "only_name", "only_text")
+DEFAULT_HIDE = ["쿠팡", "토스뱅크"]   # 1:1 방이지만 사람이 아닌 곳(채널 등). 화면만으론 구분이 안 됨
+FILTER_MAX = 40       # 문구 하나 최대 글자 수
+
+
+def load_filters():
+    saved = load_settings().get("filters")
+    if not isinstance(saved, dict):
+        return {"hide_name": list(DEFAULT_HIDE), "hide_text": [], "only_name": [], "only_text": []}
+    out = {}
+    for key in FILTER_KEYS:
+        words = saved.get(key)
+        out[key] = [w for w in words if isinstance(w, str) and w.strip()] if isinstance(words, list) else []
+    return out
+
+
+def squash(text):
+    """띄어쓰기·대소문자를 무시하고 비교함. 화면에서 읽은 글자는 띄어쓰기가 틀릴 수 있음."""
+    return re.sub(r"\s+", "", text or "").lower()
+
+
+def filter_reason(filters, name, text):
+    """이 방을 숨기는 이유 문구. 보여도 되면 None."""
+    n, t = squash(name), squash(text)
+    for w in filters["hide_name"]:
+        if squash(w) in n:
+            return f"이름에 '{w}'"
+    for w in filters["hide_text"]:
+        if squash(w) in t:
+            return f"메시지에 '{w}'"
+    if filters["only_name"] or filters["only_text"]:
+        if any(squash(w) in n for w in filters["only_name"]) or any(squash(w) in t for w in filters["only_text"]):
+            return None
+        return "'이것만 보기'에 안 맞음"
+    return None
+
+
+AUTOSTART_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+AUTOSTART_NAME = "답장독촉방"
+
+
+def autostart_command():
+    if getattr(sys, "frozen", False):
+        return f'"{sys.executable}"'
+    return f'"{os.path.join(os.path.dirname(sys.executable), "pythonw.exe")}" "{os.path.abspath(__file__)}"'
+
+
+def autostart_on():
     try:
-        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
-            json.dump({"tone": tone}, f, ensure_ascii=False)
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUTOSTART_KEY) as key:
+            winreg.QueryValueEx(key, AUTOSTART_NAME)
+        return True
     except OSError:
-        pass  # 저장이 안 돼도 이번 실행에서는 적용됨
+        return False
+
+
+def set_autostart(on):
+    try:
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, AUTOSTART_KEY) as key:
+            if on:
+                winreg.SetValueEx(key, AUTOSTART_NAME, 0, winreg.REG_SZ, autostart_command())
+            else:
+                winreg.DeleteValue(key, AUTOSTART_NAME)
+    except OSError:
+        pass  # 켜고 끈 결과는 autostart_on으로 다시 확인함
 
 
 # ───────────────────────── 카톡 읽기 ─────────────────────────
@@ -221,6 +303,21 @@ user32.SetWindowLongPtrW.argtypes = [wt.HWND, ctypes.c_int, ctypes.c_ssize_t]
 gdi32.CreateSolidBrush.restype = wt.HBRUSH
 gdi32.CreateSolidBrush.argtypes = [wt.DWORD]
 gdi32.DeleteDC.argtypes = [wt.HDC]
+user32.GetFocus.restype = wt.HWND
+user32.MonitorFromPoint.restype = wt.HANDLE
+user32.MonitorFromPoint.argtypes = [wt.POINT, wt.DWORD]
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel32.CreateMutexW.restype = wt.HANDLE
+kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wt.BOOL, wt.LPCWSTR]
+kernel32.CreateEventW.restype = wt.HANDLE
+kernel32.CreateEventW.argtypes = [ctypes.c_void_p, wt.BOOL, wt.BOOL, wt.LPCWSTR]
+kernel32.SetEvent.argtypes = [wt.HANDLE]
+kernel32.WaitForSingleObject.argtypes = [wt.HANDLE, wt.DWORD]
+imm32 = ctypes.WinDLL("imm32")
+imm32.ImmGetContext.restype = wt.HANDLE
+imm32.ImmGetContext.argtypes = [wt.HWND]
+imm32.ImmNotifyIME.argtypes = [wt.HANDLE, wt.DWORD, wt.DWORD, wt.DWORD]
+imm32.ImmReleaseContext.argtypes = [wt.HWND, wt.HANDLE]
 ENUM_PROC = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
 
 AVATAR_X = (20, 64)     # 프사 가로 범위
@@ -231,9 +328,7 @@ BADGE_COLOR = (255, 122, 107)  # 안읽음 배지 바탕색(실측). 높이 17px
 SCROLLBAR_W = 14
 DARK_LUM = 60           # 이름 글자 밝기(실측 25) 상한
 COUNT_COLOR = 0x949494  # 단톡 인원수 글자색(실측, 12px 보통 굵기)
-
-# 1:1 방이지만 사람이 아닌 곳(채널 등). 화면만으론 구분이 안 돼서 이름으로 뺌.
-IGNORE_ROOMS = {"쿠팡", "토스뱅크"}
+PREVIEW_PX, PREVIEW_COLOR = 12, 0x6E6E6E   # 메시지 미리보기 글자 크기·색(실측)
 
 
 def window_text(h):
@@ -367,11 +462,12 @@ def is_group(img, top, line):
 
 HANGUL = "".join(chr(c) for c in range(0xAC00, 0xD7A4))
 ASCII = "".join(chr(c) for c in range(0x21, 0x7F))
+JAMO = "".join(chr(c) for c in range(0x3131, 0x3164))   # ㅋㅋㅋ 같은 낱자
 UNREAD_RE = re.compile(r"\d{1,3}\+?")
 GLYPH_H = 18
 MATCH_ERR = 0.05        # 글자 대조 허용 오차 (0~1)
 SPACE_GAP = 3           # 이 칸 이상 비면 띄어쓰기 (글자 사이는 2칸 이하)
-_glyph_tables, _name_cache = {}, {}
+_glyph_tables, _name_cache, _preview_cache = {}, {}, {}
 
 
 def glyph_table(chars, px=12, weight=700, color=0x191919, bg=(255, 255, 255)):
@@ -411,9 +507,9 @@ def glyph_table(chars, px=12, weight=700, color=0x191919, bg=(255, 255, 255)):
     return _glyph_tables[key]
 
 
-def best_glyph(a, x, ys, table):
+def best_glyph(a, x, ys, table, tol=0.008):
     """x 근처에서 가장 잘 맞는 글자 → (오차, 글자, 폭, 글자 왼쪽 x, 글자 위 y).
-    오차가 거의 같으면 폭이 넓은 쪽(좁은 글자가 큰 글자의 일부에 들어맞는 경우 방지)."""
+    오차가 tol 안에서 거의 같으면 폭이 넓은 쪽(좁은 글자가 큰 글자의 일부에 들어맞는 경우 방지)."""
     found = []
     for width, (chars, stack) in table.items():
         for dx in (0, -1, 1):
@@ -428,17 +524,17 @@ def best_glyph(a, x, ys, table):
     if not found:
         return None
     least = min(f[0] for f in found)
-    return max((f for f in found if f[0] <= least + 0.008), key=lambda f: (f[2], -f[0]))
+    return max((f for f in found if f[0] <= least + tol), key=lambda f: (f[2], -f[0]))
 
 
-def read_glyphs(a, x0, x1, ys, tables, ink, drop_tail=False):
+def read_glyphs(a, x0, x1, ys, tables, ink, drop_tail=False, tol=0.008):
     """왼쪽부터 글자 대조로 읽음. tables는 앞의 것부터 시도, ink는 가로줄별 '뭔가 그려져 있음' 여부.
     못 읽은 칸은 □. drop_tail이면 맨 뒤의 못 읽는 칸(이름 뒤 상태 아이콘)은 버림."""
     x, out, ys = x0, "", list(ys)
     while x <= x1:
         g = None
         for table in tables:
-            g = g or best_glyph(a, x, ys, table)
+            g = g or best_glyph(a, x, ys, table, tol)
         if g is None:
             if drop_tail and x1 - x < 16:
                 break
@@ -502,8 +598,33 @@ def preview_crop(img, top, bottom, line):
     return a[ys[0]:ys[-1] + 1, xs[0]:xs[-1] + 1]
 
 
-def scan_rows(img):
-    """목록 그림 → 안읽음 있는 줄 [{name, count, group}]"""
+def read_preview(img, top, bottom, line):
+    """이름 아래 메시지 미리보기를 글자로 읽음. 거르기에 메시지 문구가 있을 때만 호출. 못 읽은 칸은 □."""
+    y_off, bg = line[1] + 3, img[top + 1, 3]
+    a = img[y_off:bottom - 1, NAME_X[0]:BADGE_X]
+    ink = np.abs(a - bg).sum(axis=2) > 30
+    if not ink.any():
+        return ""
+    key = a.tobytes()
+    if key not in _preview_cache:
+        if len(_preview_cache) > 300:
+            _preview_cache.clear()
+        norm = (img * 255.0 / bg).astype(np.float32)   # 선택·호버로 줄 배경이 달라도 흰 바탕 기준으로
+        # 회색 글자는 대비가 작아 글자 간 오차 차이도 작음. 한 표에서 겨루고 tol도 좁혀야 '.'을 'ㅡ'로 안 읽음
+        tables = [glyph_table(HANGUL + JAMO + ASCII, PREVIEW_PX, 400, PREVIEW_COLOR)]
+        parts = []
+        for y0, y1 in runs(ink.any(axis=1), merge=1):
+            xs = np.flatnonzero(ink[y0:y1 + 1].any(axis=0))
+            yy0, yy1 = y0 + y_off, y1 + y_off
+            mask_x = (norm[yy0 - 1:yy1 + 2] < 240).any(axis=(0, 2))
+            parts.append(read_glyphs(norm, int(xs[0]) + NAME_X[0], int(xs[-1]) + NAME_X[0],
+                                     range(max(yy0 - 5, 0), yy0 + 1), tables, mask_x, tol=0.002))
+        _preview_cache[key] = " ".join(parts)
+    return _preview_cache[key]
+
+
+def scan_rows(img, need_text=False):
+    """목록 그림 → 안읽음 있는 줄 [{name, count, group}]. need_text면 메시지도 글자로 읽어 text에 넣음."""
     out = []
     for top, bottom in find_rows(img):
         box = find_badge(img, top, bottom)
@@ -513,30 +634,33 @@ def scan_rows(img):
             ay = top + AVATAR_TOP
             out.append({"name": read_name(img, line), "count": read_count(img, box),
                         "group": is_group(img, top, line), "photo": img[ay:ay + ax1 - ax0, ax0:ax1],
-                        "preview": preview_crop(img, top, bottom, line)})
+                        "preview": preview_crop(img, top, bottom, line),
+                        "text": read_preview(img, top, bottom, line) if need_text else ""})
     return out
 
 
-def read_kakao():
+STATUS_SCALE = "화면 배율을 100%로 바꿔 주세요 · 눌러서 설정 열기"
+
+
+def read_kakao(need_text=False):
     """→ (안읽음 있는 1:1 방 목록, 상태 문구). 못 읽는 상황이면 '다 읽음'으로 착각하지 않게 상태 문구를 냄."""
     pids = kakao_pids()
     if not pids:
-        return [], "카톡이 안 켜져 있음"
+        return [], "카톡이 꺼져 있어요. 켜면 바로 읽어요"
     found = find_chat_list(pids)
     if not found:
-        return [], "카톡 채팅 목록을 못 찾음"
+        return [], "카톡 채팅 목록을 못 찾았어요 · 눌러서 열기"
     main, lst = found
     if user32.IsIconic(main) or not user32.IsWindowVisible(main):
-        return [], "카톡 창이 닫혀 있어서 못 읽음 · 눌러서 열기"
+        return [], "카톡 창이 닫혀 있어 못 읽어요 · 눌러서 열기"
     if not user32.IsWindowVisible(lst):
-        return [], "카톡을 채팅 탭에 놓아줘"
+        return [], "카톡에서 채팅 탭을 눌러 주세요 · 눌러서 열기"
     if user32.GetDpiForWindow(lst) != 96:
-        return [], "카톡 창을 배율 100% 화면에 놓아줘"
+        return [], STATUS_SCALE
     img = grab(lst)
     if img is None:
-        return [], "카톡 화면을 못 받아옴"
-    rooms = [r for r in scan_rows(img) if r["name"] and not r["group"] and r["name"] not in IGNORE_ROOMS]
-    return rooms, ""
+        return [], "카톡 화면을 못 받아왔어요. 곧 다시 해 볼게요"
+    return [r for r in scan_rows(img, need_text) if r["name"] and not r["group"]], ""
 
 
 def bring_to_front(hwnd):
@@ -668,6 +792,8 @@ class KakaoSource:
         self.result = {}
         self.avatars = {}
         self.previews = {}
+        self.texts = {}
+        self.need_text = False   # 메시지 문구로 거를 때만 위젯이 켬
         self.status = ""
         threading.Thread(target=self._loop, daemon=True).start()
 
@@ -675,9 +801,10 @@ class KakaoSource:
         user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))  # 실제 픽셀 크기로 받기
         while True:
             try:
-                rooms, status = read_kakao()
+                rooms, status = read_kakao(self.need_text)
                 self.avatars = {r["name"]: r["photo"] for r in rooms}
                 self.previews = {r["name"]: r["preview"] for r in rooms}
+                self.texts = {r["name"]: r["text"] for r in rooms}
                 self._set({r["name"]: r["count"] for r in rooms}, status)
             except Exception as e:
                 self._set({}, f"읽기 실패: {e.__class__.__name__}")
@@ -702,8 +829,8 @@ class DemoSource:
     def __init__(self):
         self.result = {"엄마": "3", "김지수": "1", "동네친구 민수": "12"}
         self.preseed = {"엄마": 75, "김지수": 15, "동네친구 민수": 1}  # 몇 분 전부터
-        self.previews = {n: self._fake_preview(t) for n, t in
-                         (("엄마", "밥은 먹었나 전화 좀 받아라"), ("김지수", "내일 몇 시에 볼까?"), ("동네친구 민수", "야 이거 봤냐ㅋㅋㅋ"))}
+        self.texts = {"엄마": "밥은 먹었나 전화 좀 받아라", "김지수": "내일 몇 시에 볼까?", "동네친구 민수": "야 이거 봤냐ㅋㅋㅋ"}
+        self.previews = {n: self._fake_preview(t) for n, t in self.texts.items()}
 
     @staticmethod
     def _fake_preview(text):
@@ -725,7 +852,7 @@ MARGIN = 16             # 그림자 여백
 AVATAR = 38
 BUBBLE_MAX = 196
 CHAT_BG = (186, 206, 224)       # 카톡 채팅방 기본 배경
-INK, INK_SOFT = (25, 25, 25), (74, 92, 110)
+INK, INK_SOFT = (25, 25, 25), (56, 72, 88)
 PILL_RED = (255, 90, 70)
 HANDLE_SIZE = 44
 # 안 읽은 시간에 따른 말풍선 (바탕색, 글자색, 굵게)
@@ -733,7 +860,8 @@ LEVEL_STYLE = [((255, 255, 255), INK, False), ((254, 229, 0), INK, False), ((232
                ((168, 226, 140), INK, False)]  # 마지막은 칭찬
 AVATAR_COLORS = [(255, 170, 130), (160, 196, 255), (178, 220, 160), (216, 180, 240), (250, 200, 110), (140, 210, 210)]
 PRAISE_STYLE = 3
-BUTTONS = [("tone", "말투 바꾸기"), ("all", "30분 동안 전부 조용히"), ("collapse", f"접어두기 · 숨기기는 {HOTKEY_TEXT}"), ("quit", "종료")]
+BUTTONS = [("settings", "설정 · 말투 · 거르기"), ("all", "30분 동안 전부 조용히"), ("collapse", f"작게 접기 · 숨기기는 {HOTKEY_TEXT}"), ("quit", "위젯 끄기")]
+ROW_TIPS = {"row:": "누르면 방이 열리고 읽음 처리돼요", "snooze:": "10분 동안 이 사람만 조용히", "hide:": "이 사람을 위젯에서 숨겨요"}
 _fonts = {}
 
 
@@ -840,9 +968,6 @@ def draw_bubble(img, box, color):
 
 
 def draw_icon(img, kind, cx, cy, color):
-    if kind in ("all", "tone"):
-        put_text(img, (cx, cy), "zZ" if kind == "all" else "말", color, "mm", font(11, True))
-        return
     n, c = px(16), px(8) * 4   # 선은 4배로 그려 줄여서 매끈하게
     r, w = px(5) * 4, round(px(1.5) * 4)
     big = Image.new("L", (n * 4, n * 4), 0)
@@ -850,6 +975,22 @@ def draw_icon(img, kind, cx, cy, color):
     if kind == "quit":
         d.line((c - r, c - r, c + r, c + r), fill=255, width=w)
         d.line((c - r, c + r, c + r, c - r), fill=255, width=w)
+    elif kind == "settings":     # 톱니바퀴
+        for i in range(8):
+            a = i * math.pi / 4
+            d.line((c + math.cos(a) * r * 0.8, c + math.sin(a) * r * 0.8, c + math.cos(a) * r * 1.4, c + math.sin(a) * r * 1.4),
+                   fill=255, width=round(w * 1.3))
+        d.ellipse((c - r, c - r, c + r, c + r), fill=255)
+        d.ellipse((c - r * 0.45, c - r * 0.45, c + r * 0.45, c + r * 0.45), fill=0)
+    elif kind == "all":          # 초승달: 방해 금지
+        d.ellipse((c - r * 1.25, c - r * 1.25, c + r * 1.25, c + r * 1.25), fill=255)
+        d.ellipse((c - r * 0.55, c - r * 1.65, c + r * 1.75, c + r * 0.65), fill=0)
+    elif kind == "back":
+        d.line((c + r * 0.5, c - r, c - r * 0.5, c, c + r * 0.5, c + r), fill=255, width=w, joint="curve")
+    elif kind == "next":
+        d.line((c - r * 0.4, c - r * 0.8, c + r * 0.4, c, c - r * 0.4, c + r * 0.8), fill=255, width=w, joint="curve")
+    elif kind == "check":
+        d.line((c - r, c, c - r * 0.25, c + r * 0.75, c + r, c - r * 0.7), fill=255, width=w, joint="curve")
     else:
         d.line((c - r, c, c + r, c), fill=255, width=w)
     layer = Image.new("RGBA", (n, n), tuple(color) + (255,))
@@ -857,8 +998,8 @@ def draw_icon(img, kind, cx, cy, color):
     img.alpha_composite(layer, (cx - n // 2, cy - n // 2))
 
 
-def render_panel(items, more, hover, title="답장 독촉방"):
-    """펼친 카톡방 → (RGBA 그림, 누를 수 있는 영역 [(x0, y0, x1, y1, 이름)])"""
+def render_panel(items, more, hover, title="답장 독촉방", foot=None):
+    """펼친 카톡방 → (RGBA 그림, 누를 수 있는 영역 [(x0, y0, x1, y1, 이름)]). foot은 맨 아래 줄 (글자, 눌렀을 때 이름)."""
     m, w = px(MARGIN), px(PANEL_W)
     head, pad = px(42), px(12)
     f_msg, f_bold, f_name, f_small = font(13), font(13, True), font(11.5, True), font(10.5)
@@ -873,6 +1014,9 @@ def render_panel(items, more, hover, title="답장 독촉방"):
     if more:
         total += px(22)
     total += px(4)
+    more_y = m + total - px(16)
+    if foot:
+        total += px(34)
     img = Image.new("RGBA", (w + m * 2, total + m * 2), (0, 0, 0, 0))
     panel = (m, m, m + w, m + total)
     drop_shadow(img, panel, px(16))
@@ -880,8 +1024,9 @@ def render_panel(items, more, hover, title="답장 독촉방"):
     hits = []
 
     tip = dict(BUTTONS).get(hover)
-    if hover and hover.startswith("row:"):
-        tip = f"눌러서 {hover[4:]} 방 열기 · 읽음 처리됨"
+    for prefix, text in ROW_TIPS.items():
+        if hover and hover.startswith(prefix):
+            tip = text
     if tip:
         put_text(img, (m + px(14), m + head // 2), clip(tip, font(12), px(212)), INK_SOFT, "lm", font(12))
     else:
@@ -905,7 +1050,8 @@ def render_panel(items, more, hover, title="답장 독촉방"):
         name = it["name"]
         top = m + y
         row_hit = (m, top - pad // 2, m + w, top + max(h, px(AVATAR)) + pad // 2, "row:" + name)
-        if hover == "row:" + name:
+        row_hover = hover in ("row:" + name, "snooze:" + name, "hide:" + name)
+        if row_hover:
             fill_round(img, (m + px(5), top - px(4), m + w - px(5), top + max(h, px(AVATAR)) + px(4)), px(10), (255, 255, 255), 70)
         draw_avatar(img, m + px(12), top, name, it.get("photo"))
         nx = m + px(12) + px(AVATAR) + px(9)
@@ -929,18 +1075,30 @@ def render_panel(items, more, hover, title="답장 독촉방"):
         if "note" in it:     # 칭찬 줄은 누를 게 없음
             put_text(img, (rx, bub[3] - px(1)), it["note"], INK_SOFT, "ld", f_small)
             continue
-        if hover in ("row:" + name, "snooze:" + name):
+        if row_hover:
             label = f"{SNOOZE_MIN}분 조용히"
             cw = int(text_w(f_small, label)) + px(14)
             chip = (rx, bub[3] - px(21), rx + cw, bub[3])
             fill_round(img, chip, px(7), (40, 60, 80), 225 if hover.startswith("snooze") else 150)
             put_text(img, ((chip[0] + chip[2]) // 2, (chip[1] + chip[3]) // 2), label, (255, 255, 255), "mm", f_small)
             hits.append(chip + ("snooze:" + name,))
+            label = "안 보기"     # 말풍선이 길어도 안 겹치게 이름 줄 오른쪽에 둠
+            cw = int(text_w(f_small, label)) + px(14)
+            chip = (m + w - px(12) - cw, top - px(2), m + w - px(12), top + px(17))
+            fill_round(img, chip, px(7), (40, 60, 80), 225 if hover.startswith("hide") else 150)
+            put_text(img, ((chip[0] + chip[2]) // 2, (chip[1] + chip[3]) // 2), label, (255, 255, 255), "mm", f_small)
+            hits.append(chip + ("hide:" + name,))
         else:
             put_text(img, (rx, bub[3] - px(1)), waited_text(it["mins"]), INK_SOFT, "ld", f_small)
         hits.append(row_hit)
     if more:
-        put_text(img, (m + w // 2, m + total - px(16)), f"외 {more}명 더", INK_SOFT, "mm", f_small)
+        put_text(img, (m + w // 2, more_y), f"외 {more}명 더", INK_SOFT, "mm", f_small)
+    if foot:
+        text, key = foot
+        box = (m + px(10), m + total - px(36), m + w - px(10), m + total - px(8))
+        fill_round(img, box, px(9), (255, 255, 255), 200 if hover == key else 110)
+        put_text(img, (m + w // 2, (box[1] + box[3]) // 2), clip(text, font(11.5), box[2] - box[0] - px(16)), INK, "mm", font(11.5))
+        hits.append(box + (key,))
     return img, hits
 
 
@@ -962,13 +1120,13 @@ def render_tones(current, hover, hotkey_ok=True):
     panel = (m, m, m + w, m + total)
     drop_shadow(img, panel, px(16))
     fill_round(img, panel, px(16), CHAT_BG)
-    put_text(img, (m + px(14), m + head // 2), "말투 고르기", INK, "lm", font(13.5, True))
     s = px(28)
-    close = (m + w - px(8) - s, m + (head - s) // 2, m + w - px(8), m + (head - s) // 2 + s)
+    back = (m + px(8), m + (head - s) // 2, m + px(8) + s, m + (head - s) // 2 + s)
     if hover == "tone_close":
-        fill_round(img, close, px(8), (40, 60, 80), 34)
-    draw_icon(img, "quit", (close[0] + close[2]) // 2, (close[1] + close[3]) // 2, INK if hover == "tone_close" else INK_SOFT)
-    hits = [close + ("tone_close",), (m, m, close[0], m + head, "drag")]
+        fill_round(img, back, px(8), (40, 60, 80), 34)
+    draw_icon(img, "back", (back[0] + back[2]) // 2, (back[1] + back[3]) // 2, INK if hover == "tone_close" else INK_SOFT)
+    put_text(img, (back[2] + px(4), m + head // 2), "말투 고르기", INK, "lm", font(13.5, True))
+    hits = [back + ("tone_close",), (back[2], m, m + w, m + head, "drag")]
     for i, (key, label, levels) in enumerate(TONES):
         y = m + head + row_h * i
         box = (m + px(8), y + px(2), m + w - px(8), y + row_h - px(2))
@@ -979,6 +1137,8 @@ def render_tones(current, hover, hotkey_ok=True):
         put_text(img, (box[0] + px(12), y + px(14)), label, INK, "lm", font(12.5, True))
         sample = clip(levels[0][0], font(11), box[2] - box[0] - px(24))
         put_text(img, (box[0] + px(12), y + px(30)), sample, INK if key == current else INK_SOFT, "lm", font(11))
+        if key == current:
+            draw_icon(img, "check", box[2] - px(20), (box[1] + box[3]) // 2, INK)
         hits.append(box + ("tone:" + key,))
     fy = m + total - foot // 2
     label = "내 대사 고치기"
@@ -992,6 +1152,81 @@ def render_tones(current, hover, hotkey_ok=True):
     return img, hits
 
 
+def render_settings(tone_label, filter_note, auto_on, hover, hotkey_ok=True):
+    """설정 첫 화면: 말투, 거르기, 자동 실행."""
+    m, w = px(MARGIN), px(PANEL_W)
+    head, row_h, foot = px(42), px(54), px(34)
+    rows = (("open_tones", "말투", tone_label), ("open_filters", "거르기", filter_note),
+            ("autostart", "윈도우 켤 때 같이 켜기", "재부팅해도 다시 켤 필요 없어요"))
+    total = head + row_h * len(rows) + foot
+    img = Image.new("RGBA", (w + m * 2, total + m * 2), (0, 0, 0, 0))
+    panel = (m, m, m + w, m + total)
+    drop_shadow(img, panel, px(16))
+    fill_round(img, panel, px(16), CHAT_BG)
+    put_text(img, (m + px(14), m + head // 2), "설정", INK, "lm", font(13.5, True))
+    s = px(28)
+    close = (m + w - px(8) - s, m + (head - s) // 2, m + w - px(8), m + (head - s) // 2 + s)
+    if hover == "settings_close":
+        fill_round(img, close, px(8), (40, 60, 80), 34)
+    draw_icon(img, "quit", (close[0] + close[2]) // 2, (close[1] + close[3]) // 2, INK if hover == "settings_close" else INK_SOFT)
+    hits = [close + ("settings_close",), (m, m, close[0], m + head, "drag")]
+    for i, (key, label, note) in enumerate(rows):
+        y = m + head + row_h * i
+        box = (m + px(8), y + px(2), m + w - px(8), y + row_h - px(2))
+        fill_round(img, box, px(11), (255, 255, 255), 215 if hover == key else 130)
+        put_text(img, (box[0] + px(12), y + px(18)), label, INK, "lm", font(12.5, True))
+        put_text(img, (box[0] + px(12), y + px(36)), clip(note, font(11), px(250)), INK_SOFT, "lm", font(11))
+        cy = (box[1] + box[3]) // 2
+        if key == "autostart":
+            sw = (box[2] - px(46), cy - px(10), box[2] - px(12), cy + px(10))
+            fill_round(img, sw, px(10), (254, 229, 0) if auto_on else (150, 165, 180))
+            kx = sw[2] - px(10) if auto_on else sw[0] + px(10)
+            fill_round(img, (kx - px(8), cy - px(8), kx + px(8), cy + px(8)), px(8), (255, 255, 255))
+        else:
+            draw_icon(img, "next", box[2] - px(18), cy, INK_SOFT)
+        hits.append(box + (key,))
+    hint = f"{HOTKEY_TEXT}: 숨기기·다시 보이기" if hotkey_ok else "다른 프로그램이 단축키를 쓰는 중"
+    put_text(img, (m + px(20), m + total - foot // 2), hint, INK_SOFT, "lm", font(10.5))
+    return img, hits
+
+
+WELCOME_LINES = ("안 읽은 1:1 톡이 있으면 여기서 잔소리해요.",
+                 "카톡 채팅 목록 창을 열어 두세요. 다른 창에 가려져도 되지만, 최소화하면 못 읽어요.",
+                 "기본 말투에 욕이 나와요. 회사에서는 '회사용 (순한 맛)'을 고르세요.")
+
+
+def render_welcome(hover):
+    """처음 켰을 때 한 번만 나오는 안내."""
+    m, w = px(MARGIN), px(PANEL_W)
+    head, f = px(46), font(12.5)
+    wrapped = [wrap(line, f, w - px(58)) for line in WELCOME_LINES]
+    line_h, gap, foot = px(20), px(10), px(52)
+    total = head + sum(len(l) * line_h + gap for l in wrapped) + foot
+    img = Image.new("RGBA", (w + m * 2, total + m * 2), (0, 0, 0, 0))
+    panel = (m, m, m + w, m + total)
+    drop_shadow(img, panel, px(16))
+    fill_round(img, panel, px(16), CHAT_BG)
+    put_text(img, (m + px(16), m + head // 2 + px(2)), "답장독촉방이 켜졌어요", INK, "lm", font(14, True))
+    y = m + head
+    for no, lines in enumerate(wrapped, 1):
+        fill_round(img, (m + px(16), y + px(1), m + px(34), y + px(19)), px(9), (255, 255, 255), 180)
+        put_text(img, (m + px(25), y + px(10)), str(no), INK, "mm", font(10.5, True))
+        for i, line in enumerate(lines):
+            put_text(img, (m + px(42), y + px(10) + line_h * i), line, INK, "lm", f)
+        y += len(lines) * line_h + gap
+    hits = [(m, m, m + w, m + head, "drag")]
+    x = m + w - px(14)
+    by = m + total - px(44)
+    for key, label, color in (("welcome_ok", "시작하기", (254, 229, 0)), ("welcome_tone", "말투 고르기", (255, 255, 255))):
+        cw = int(text_w(font(12.5, True), label)) + px(28)
+        box = (x - cw, by, x, by + px(32))
+        fill_round(img, box, px(10), color, 255 if hover == key else 215)
+        put_text(img, ((box[0] + box[2]) // 2, (box[1] + box[3]) // 2), label, INK, "mm", font(12.5, True))
+        hits.insert(0, box + (key,))
+        x -= cw + px(8)
+    return img, hits
+
+
 def add_preview(img, hits, name, count, crop):
     """줄에 마우스를 올렸을 때 카톡방 왼쪽에 미리보기 카드를 붙임. 줄이 움직이지 않게 위아래 배치는 그대로 둠."""
     m, gap = px(MARGIN), px(8)
@@ -1000,7 +1235,7 @@ def add_preview(img, hits, name, count, crop):
         unseen = int(count) - 1
     except ValueError:
         unseen = 1
-    note = f"최근 메시지만 · 앞의 {unseen}개는 안 보임" if unseen > 0 else "읽음 표시 안 됨"
+    note = f"읽음 처리 안 돼요 · 앞의 {unseen}개는 안 보여요" if unseen > 0 else "읽음 처리 안 돼요"
     f = font(10.5)
     cw = max(pic.size[0], int(text_w(f, note))) + px(24)
     ch = pic.size[1] + px(44)
@@ -1019,8 +1254,8 @@ def add_preview(img, hits, name, count, crop):
     return canvas, [(a + dx, b + dy, c + dx, d + dy, n) for a, b, c, d, n in hits]
 
 
-def render_handle(count, label, warn, hover):
-    """접힌 모양: 동그란 손잡이. 마우스를 올리거나 알릴 게 있으면 왼쪽으로 글자가 펼쳐짐."""
+def render_handle(count, label, warn, hover, quiet=False):
+    """접힌 모양: 동그란 손잡이. 마우스를 올리거나 알릴 게 있으면 왼쪽으로 글자가 펼쳐짐. quiet면 달 표시."""
     m, s = px(MARGIN), px(HANDLE_SIZE)
     f = font(12)
     open_ = bool(warn or hover)
@@ -1053,12 +1288,16 @@ def render_handle(count, label, warn, hover):
         cw = max(px(18), int(text_w(font(10, True), t)) + px(10))
         fill_round(img, (W - cw, m, W, m + px(18)), px(9), PILL_RED)
         put_text(img, (W - cw // 2, m + px(9)), t, (255, 255, 255), "mm", font(10, True))
+    if quiet:
+        fill_round(img, (W - px(18), m, W, m + px(18)), px(9), (56, 72, 88))
+        draw_icon(img, "all", W - px(9), m + px(9), (255, 255, 255))
     hits = [(W - s, m, W, m + s, "handle")]
     if tw:
-        put_text(img, (m + qw + px(14), cy), label, INK, "lm", f)
+        tip = {"quit": "위젯 끄기", "settings": "설정"}.get(hover, label)
+        put_text(img, (m + qw + px(14), cy), clip(tip, f, tw - px(26)), INK, "lm", f)
         hits.append((m + qw, m, W - s, m + s, "handle"))
     if qw:
-        for i, key in enumerate(("quit", "tone")):
+        for i, key in enumerate(("quit", "settings")):
             box = (m + px(7 + 28 * i), cy - px(13), m + px(33 + 28 * i), cy + px(13))
             if hover == key:
                 fill_round(img, box, px(8), (40, 60, 80), 34)
@@ -1066,6 +1305,19 @@ def render_handle(count, label, warn, hover):
             hits.append(box + (key,))
         hits.append((0, 0, img.size[0], img.size[1], "drag"))   # 버튼 사이 틈을 지나도 접히지 않게
     return img, hits
+
+
+SHOW_EVENT = "Local\\KakaoNaggerShow"
+
+
+def already_running():
+    """이미 켜져 있으면 그쪽 위젯이 나타나게 신호를 보내고 True. 안 보여서 또 실행해도 위젯이 둘이 되지 않게 함."""
+    global _instance_mutex
+    _instance_mutex = kernel32.CreateMutexW(None, False, "Local\\KakaoNagger")
+    if ctypes.get_last_error() != 183:  # ERROR_ALREADY_EXISTS
+        return False
+    kernel32.SetEvent(kernel32.CreateEventW(None, False, False, SHOW_EVENT))
+    return True
 
 
 class _Blend(ctypes.Structure):
@@ -1083,6 +1335,131 @@ def watch_hotkey(pressed, failed):
             pressed.set()
 
 
+class FilterWindow:
+    """거르기 규칙 창. 글자를 쳐야 해서 위젯 그림이 아니라 보통 창으로 띄움. 바꾸면 바로 적용됨."""
+    GROUPS = (("숨기기", "이 문구가 들어가면 위젯에 안 나와요.", (("hide_name", "이름"), ("hide_text", "메시지"))),
+              ("이것만 보기", "하나라도 넣으면 여기 맞는 방만 나와요. 비워 두면 전부 나와요.", (("only_name", "이름"), ("only_text", "메시지"))))
+    SOFT, LINE, CHIP, ACCENT = "#5A6B7B", "#D5DCE3", "#EEF2F6", "#FEE500"
+
+    def __init__(self, widget):
+        self.widget = widget
+        self.win = win = tk.Toplevel(widget.root)
+        win.title("거르기")
+        win.configure(bg="white", padx=px(20), pady=px(14))
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+        win.protocol("WM_DELETE_WINDOW", self.close)
+        icon = sys.executable if getattr(sys, "frozen", False) else os.path.join(HERE, "assets", "icon.ico")
+        try:
+            win.iconbitmap(icon)
+        except tk.TclError:
+            pass
+        self.f = ("맑은 고딕", -px(13))
+        self.f_small = ("맑은 고딕", -px(12))
+        self.f_bold = ("맑은 고딕", -px(15), "bold")
+        self.entries, self.chips = {}, {}
+        for no, (title, desc, keys) in enumerate(self.GROUPS):
+            tk.Label(win, text=title, font=self.f_bold, bg="white", anchor="w").pack(fill="x", pady=(px(14) if no else 0, 0))
+            tk.Label(win, text=desc, font=self.f_small, fg=self.SOFT, bg="white", anchor="w").pack(fill="x", pady=(0, px(6)))
+            for key, label in keys:
+                self.add_row(key, label)
+        tk.Frame(win, bg=self.LINE, height=1).pack(fill="x", pady=(px(12), px(10)))
+        tk.Label(win, text="지금 안 읽은 방", font=self.f_bold, bg="white", anchor="w").pack(fill="x")
+        self.rooms = tk.Frame(win, bg="white")
+        self.rooms.pack(fill="x", pady=(px(4), px(8)))
+        tk.Label(win, text="메시지는 카톡 목록에 보이는 최근 메시지만 확인해요. 사진·이모티콘은 못 읽을 수 있어요.",
+                 font=self.f_small, fg=self.SOFT, bg="white", anchor="w").pack(fill="x")
+        self.room_sig = None
+        self.redraw()
+        self.show_rooms()
+        win.update_idletasks()
+        win.geometry(f"+{(win.winfo_screenwidth() - win.winfo_reqwidth()) // 2}+{(win.winfo_screenheight() - win.winfo_reqheight()) // 3}")
+        win.update()
+        user32.SetForegroundWindow(user32.GetAncestor(win.winfo_id(), 2))   # 위젯은 포커스를 안 받으니 이 창을 바로 칠 수 있게 올림
+        win.focus_force()
+        self.entries["hide_name"].focus_set()
+
+    def add_row(self, key, label):
+        row = tk.Frame(self.win, bg="white")
+        row.pack(fill="x", pady=px(2))
+        tk.Label(row, text=label, font=self.f, bg="white", width=6, anchor="w").pack(side="left")
+        add = tk.Label(row, text="추가", font=self.f, bg=self.ACCENT, padx=px(12), pady=px(3), cursor="hand2")
+        add.pack(side="right", padx=(px(6), 0))
+        add.bind("<Button-1>", lambda e: self.add_word(key))
+        entry = tk.Entry(row, font=self.f, relief="solid", bd=1, highlightthickness=0, width=34)
+        entry.pack(side="left", fill="x", expand=True, ipady=px(3))
+        entry.bind("<Return>", lambda e: self.add_word(key))
+        chips = tk.Frame(self.win, bg="white")
+        chips.pack(fill="x", padx=(px(52), 0))
+        self.entries[key], self.chips[key] = entry, chips
+
+    def add_word(self, key):
+        entry = self.entries[key]
+        # 한글 조합 중에 '추가'를 누르면 마지막 글자가 아직 칸에 안 들어와 있음
+        hwnd = user32.GetFocus()
+        himc = imm32.ImmGetContext(hwnd)
+        if himc:
+            imm32.ImmNotifyIME(himc, 0x15, 1, 0)   # NI_COMPOSITIONSTR, CPS_COMPLETE
+            imm32.ImmReleaseContext(hwnd, himc)
+        self.win.update()
+        word = " ".join(entry.get().split())[:FILTER_MAX]
+        entry.delete(0, "end")
+        words = self.widget.filters[key]
+        if word and word not in words:
+            words.append(word)
+            self.widget.apply_filters()
+        entry.focus_set()
+
+    def remove_word(self, key, word):
+        self.widget.filters[key].remove(word)
+        self.widget.apply_filters()
+
+    def redraw(self):
+        """문구 칩을 다시 그림. 칸 폭을 넘으면 다음 줄로."""
+        limit = self.entries["hide_name"].winfo_reqwidth() + px(50)
+        measure = tk.font.Font(font=self.f).measure
+        for key, frame in self.chips.items():
+            for child in frame.winfo_children():
+                child.destroy()
+            row, used = None, 0
+            for word in self.widget.filters[key]:
+                width = measure(word) + px(44)
+                if row is None or used + width > limit:
+                    row, used = tk.Frame(frame, bg="white"), 0
+                    row.pack(anchor="w", pady=(px(3), 0))
+                used += width
+                chip = tk.Frame(row, bg=self.CHIP)
+                chip.pack(side="left", padx=(0, px(4)))
+                tk.Label(chip, text=word, font=self.f_small, bg=self.CHIP, padx=px(6), pady=px(2)).pack(side="left")
+                x = tk.Label(chip, text="✕", font=self.f_small, fg=self.SOFT, bg=self.CHIP, padx=px(5), cursor="hand2")
+                x.pack(side="left")
+                x.bind("<Button-1>", lambda e, k=key, w=word: self.remove_word(k, w))
+        self.room_sig = None
+
+    def show_rooms(self):
+        """지금 안 읽은 방이 규칙에 따라 어떻게 되는지 바로 보여 줌."""
+        rooms = [(n, self.widget.filtered.get(n)) for n in sorted(self.widget.raw)]
+        if rooms == self.room_sig:
+            return
+        self.room_sig = rooms
+        for child in self.rooms.winfo_children():
+            child.destroy()
+        if not rooms:
+            tk.Label(self.rooms, text="지금 안 읽은 1:1 방이 없어요.", font=self.f_small, fg=self.SOFT, bg="white", anchor="w").pack(fill="x")
+        for name, why in rooms[:6]:
+            row = tk.Frame(self.rooms, bg="white")
+            row.pack(fill="x")
+            tk.Label(row, text=name, font=self.f, fg=self.SOFT if why else "black", bg="white", anchor="w").pack(side="left")
+            tk.Label(row, text=f"숨김 · {why}" if why else "보임", font=self.f_small, fg=self.SOFT if why else "#1E7B34",
+                     bg="white", anchor="e").pack(side="right")
+        if len(rooms) > 6:
+            tk.Label(self.rooms, text=f"외 {len(rooms) - 6}개", font=self.f_small, fg=self.SOFT, bg="white", anchor="w").pack(fill="x")
+
+    def close(self):
+        self.win.destroy()
+        self.widget.filter_win = None
+
+
 class NagWidget:
     def __init__(self, root, source):
         self.root, self.source = root, source
@@ -1093,10 +1470,16 @@ class NagWidget:
         self.hidden = False      # 단축키로 완전히 숨긴 상태
         self.hotkey_pressed, self.hotkey_failed = threading.Event(), threading.Event()
         threading.Thread(target=watch_hotkey, args=(self.hotkey_pressed, self.hotkey_failed), daemon=True).start()
+        self.show_event = kernel32.CreateEventW(None, False, False, SHOW_EVENT)
         self.quiet_until = 0     # '전부 조용히' 끝나는 시각
         self.collapsed = False
         self.tone = load_tone()
-        self.choosing_tone = False
+        settings = load_settings()
+        self.screen = None if "welcomed" in settings or "tone" in settings else "welcome"   # None, welcome, settings, tones
+        self.filters = load_filters()
+        self.raw, self.filtered = {}, {}     # 거르기 전 안 읽은 방, 숨긴 방 {이름: 이유}
+        self.filter_win = None
+        self.undo = None         # (이름, 되돌리기 끝나는 시각)
         self.hover = None
         self.press = None
         self.sig = None
@@ -1112,6 +1495,10 @@ class NagWidget:
         area = wt.RECT()
         user32.SystemParametersInfoW(0x30, 0, ctypes.byref(area), 0)  # SPI_GETWORKAREA
         self.anchor = (area.right - px(4), area.bottom - px(4))
+        saved = settings.get("anchor")
+        if (isinstance(saved, list) and len(saved) == 2 and all(isinstance(v, int) for v in saved)
+                and user32.MonitorFromPoint(wt.POINT(saved[0] - px(30), saved[1] - px(30)), 0)):  # 모니터를 뺐으면 기본 자리로
+            self.anchor = tuple(saved)
 
         root.overrideredirect(True)
         root.attributes("-topmost", True)
@@ -1128,6 +1515,32 @@ class NagWidget:
         root.bind("<ButtonRelease-1>", self.on_release)
         self.tick()
         self.poll_hotkey()
+
+    # ── 거르기 ──
+    def apply_filters(self):
+        save_settings(filters=self.filters)
+        if self.filter_win:
+            self.filter_win.redraw()
+        self.refresh()
+
+    def hide_person(self, name, now):
+        if name not in self.filters["hide_name"]:
+            self.filters["hide_name"].append(name)
+        self.undo = (name, now + UNDO_SEC)
+        self.apply_filters()
+
+    def undo_hide(self):
+        if self.undo and self.undo[0] in self.filters["hide_name"]:
+            self.filters["hide_name"].remove(self.undo[0])
+        self.undo = None
+        self.apply_filters()
+
+    def open_filters(self):
+        if self.filter_win:
+            self.filter_win.win.lift()
+            self.filter_win.win.focus_force()
+        else:
+            self.filter_win = FilterWindow(self)
 
     # ── 화면에 올리기 ──
     def push(self, img, x, y, alpha=255):
@@ -1156,7 +1569,9 @@ class NagWidget:
 
     def screen_xy(self, dx=0):
         w, h = self.img.size
-        return self.anchor[0] - w + dx, self.anchor[1] - h
+        # 화면 위쪽으로 옮겨 둬도 펼친 위젯의 버튼이 화면 밖으로 안 나가게
+        return (max(self.anchor[0] - w, user32.GetSystemMetrics(76)) + dx,
+                max(self.anchor[1] - h, user32.GetSystemMetrics(77)))
 
     def paint(self):
         self.img, self.hits = self.compose()
@@ -1189,18 +1604,33 @@ class NagWidget:
         return [n for n in self.current if self.snoozed.get(n, 0) < now]
 
     def compose(self):
-        if self.choosing_tone:
+        if self.screen == "welcome":
+            return render_welcome(self.hover)
+        if self.screen == "tones":
             return render_tones(self.tone, self.hover, not self.hotkey_failed.is_set())
+        if self.screen == "settings":
+            rules = sum(len(self.filters[k]) for k in FILTER_KEYS)
+            note = f"규칙 {rules}개 · 지금 숨긴 방 {len(self.filtered)}개" if rules else "이름이나 메시지로 방을 숨기거나 골라 봐요"
+            label = next(label for key, label, _ in TONES if key == self.tone)
+            return render_settings(label, note, autostart_on(), self.hover, not self.hotkey_failed.is_set())
         now = time.time()
         names = sorted(self.visible_items(now), key=lambda n: self.first_seen.get(n, now))
         waited = {n: int((now - self.first_seen[n]) / 60) for n in names}
         if self.status:
             return render_handle(0, self.status, True, self.hover)
         if now < self.quiet_until:
-            return render_handle(0, f"{int((self.quiet_until - now) / 60) + 1}분 더 조용히 · 눌러서 깨우기", False, self.hover)
-        if self.collapsed or not (names or self.praised):
+            return render_handle(0, f"{int((self.quiet_until - now) / 60) + 1}분 더 조용히 · 눌러서 깨우기", False, self.hover, True)
+        undoing = self.undo and self.undo[1] > now
+        if self.collapsed or not (names or self.praised or undoing):
             label = f"답장 밀린 사람 {len(names)}명 · 눌러서 펼치기" if names else "밀린 답장 없음"
+            if self.filtered and not names:
+                label += f" · 숨긴 방 {len(self.filtered)}개"
             return render_handle(len(names), label, False, self.hover)
+        foot = None
+        if undoing:
+            foot = (f"{self.undo[0]} 숨겼어요 · 되돌리기", "undo")
+        elif self.filtered:
+            foot = (f"거르기로 숨긴 방 {len(self.filtered)}개 · 규칙 보기", "open_filters")
         mild = self.tone in MILD_TONES
         items = [{"name": n, "count": "", "mins": 0, "level": 0, "style": PRAISE_STYLE, "line": v[0], "note": v[1], "photo": v[2]}
                  for n, v in list(self.praised.items())[-MAX_PRAISE:]]
@@ -1212,8 +1642,8 @@ class NagWidget:
             if mild:
                 it["style"] = 0
             items.append(it)
-        img, hits = render_panel(items, max(0, len(names) - MAX_BUBBLES), self.hover, "확인할 메시지" if mild else "답장 독촉방")
-        target = self.hover.split(":", 1)[1] if self.hover and self.hover.startswith(("row:", "snooze:")) else None
+        img, hits = render_panel(items, max(0, len(names) - MAX_BUBBLES), self.hover, "확인할 메시지" if mild else "답장 독촉방", foot)
+        target = self.hover.split(":", 1)[1] if self.hover and self.hover.startswith(("row:", "snooze:", "hide:")) else None
         crop = getattr(self.source, "previews", {}).get(target)
         if crop is not None and target in names[:MAX_BUBBLES]:
             img, hits = add_preview(img, hits, target, self.current.get(target, ""), crop)
@@ -1261,6 +1691,10 @@ class NagWidget:
         if self.hotkey_pressed.is_set():
             self.hotkey_pressed.clear()
             self.toggle_hidden()
+        if self.show_event and kernel32.WaitForSingleObject(self.show_event, 0) == 0:   # 또 실행해서 신호가 옴
+            if self.hidden:
+                self.toggle_hidden()
+            self.shake()
         self.root.after(50, self.poll_hotkey)
 
     def toggle_hidden(self):
@@ -1274,21 +1708,40 @@ class NagWidget:
             user32.ShowWindow(self.hwnd, 8)  # SW_SHOWNA: 포커스를 안 뺏음
 
     def tick(self):
-        self.current, self.status = self.source.get()
+        self.refresh()
+        self.root.after(1000, self.tick)
+
+    def refresh(self):
+        self.raw, self.status = self.source.get()
+        self.source.need_text = bool(self.filters["hide_text"] or self.filters["only_text"])
+        texts = getattr(self.source, "texts", {})
+        was_filtered = self.filtered
+        self.filtered = {}
+        for n in self.raw:
+            why = filter_reason(self.filters, n, texts.get(n))
+            if why:
+                self.filtered[n] = why
+        self.current = {n: c for n, c in self.raw.items() if n not in self.filtered}
+        if self.filter_win:
+            self.filter_win.show_rooms()
         now = time.time()
         self.refresh_custom()
         photos = getattr(self.source, "avatars", {})
-        for n in self.current:
+        for n in self.raw:        # 숨긴 방도 기다린 시간은 재 둠. 규칙을 지우면 이어서 보임
             self.first_seen.setdefault(n, now)
             if n in photos:
                 self.photos[n] = photos[n]
             self.praised.pop(n, None)
         for n in list(self.first_seen):
-            if n not in self.current:
-                self.praise(n, now)
+            if n not in self.raw:
+                if n not in was_filtered:   # 숨겨 둔 방을 읽은 건 칭찬할 일이 아님
+                    self.praise(n, now)
                 for d in (self.first_seen, self.snoozed, self.lines, self.counts, self.last_shake, self.photos):
                     d.pop(n, None)
         self.praised = {n: v for n, v in self.praised.items() if v[3] > now}
+        undoing = bool(self.undo and self.undo[1] > now)
+        if self.undo and not undoing:
+            self.undo = None
         visible = set(self.visible_items(now))
         arrived = visible - self.items_shown
         if arrived:
@@ -1296,10 +1749,10 @@ class NagWidget:
         self.items_shown = visible
         if self.hover and not self.pointer_inside():
             self.hover = None
-        if arrived:
-            self.choosing_tone = False   # 새 사람이 오면 독촉이 먼저
+        if arrived and self.screen != "welcome":
+            self.screen = None       # 새 사람이 오면 독촉이 먼저
         sig = (tuple(sorted(self.current.items())), self.status, tuple(sorted(visible)), self.collapsed, self.hover,
-               self.choosing_tone, self.tone, tuple(sorted(self.praised)),
+               self.screen, self.tone, tuple(sorted(self.praised)), undoing, tuple(sorted(self.filtered)),
                self.quiet_until > now and int((self.quiet_until - now) / 60),
                tuple(int((now - self.first_seen[n]) / 60) for n in sorted(visible)),
                tuple(v[1] for _, v in sorted(self.lines.items())) if self.lines else ())
@@ -1310,11 +1763,10 @@ class NagWidget:
                 self.slide_in()
         angry = [n for n in visible if now - self.first_seen[n] >= LEVEL_MIN[-1] * 60]
         due = [n for n in angry if now - self.last_shake.get(n, 0) >= SHAKE_SEC]
-        if due and not (self.collapsed or self.choosing_tone or self.hidden or self.tone in MILD_TONES):
+        if due and not (self.collapsed or self.screen or self.hidden or self.tone in MILD_TONES):
             for n in angry:
                 self.last_shake[n] = now
             self.shake()
-        self.root.after(1000, self.tick)
 
     # ── 마우스 ──
     def pointer_inside(self):
@@ -1353,17 +1805,35 @@ class NagWidget:
 
     def on_release(self, e):
         press, self.press = self.press, None
-        if not press or press[4]:
+        if not press:
+            return
+        if press[4]:
+            save_settings(anchor=list(self.anchor))   # 옮긴 자리를 다음에 켤 때도 씀
             return
         hit = press[3]
         now = time.time()
         if hit == "quit":
             self.root.destroy()
             return
-        if hit == "tone":
-            self.choosing_tone = True
+        if hit == "settings":
+            self.screen = "settings"
+        elif hit == "settings_close":
+            self.screen = None
+        elif hit == "open_tones":
+            self.screen = "tones"
         elif hit == "tone_close":
-            self.choosing_tone = False
+            self.screen = "settings"
+        elif hit == "welcome_ok":
+            self.screen = None
+            save_settings(welcomed=True)
+        elif hit == "welcome_tone":
+            self.screen = "tones"
+            save_settings(welcomed=True)
+        elif hit == "open_filters":
+            self.open_filters()
+            return
+        elif hit == "autostart":
+            set_autostart(not autostart_on())
         elif hit and hit.startswith("tone:"):
             self.tone = hit[5:]
             self.lines.clear()   # 대사를 새 말투로 다시 고름
@@ -1375,20 +1845,27 @@ class NagWidget:
         elif hit == "collapse":
             self.collapsed = True
         elif hit == "handle":
-            if self.status:
+            if self.status == STATUS_SCALE:
+                os.startfile("ms-settings:display")
+            elif self.status:
                 self.source.open_kakao()
             self.collapsed = False
             self.quiet_until = 0
+        elif hit == "undo":
+            self.undo_hide()
         elif hit and hit.startswith("row:"):
             self.source.open_room(hit[4:])
             return
         elif hit and hit.startswith("snooze:"):
             self.snoozed[hit[7:]] = now + SNOOZE_MIN * 60
+        elif hit and hit.startswith("hide:"):
+            self.hide_person(hit[5:], now)
         else:
             return
         self.hover = None
         self.items_shown = set(self.visible_items(now))
         self.sig = None
+        self.refresh()   # 다음 주기를 기다리지 않고 바로 화면에 보임
 
 
 # ───────────────────────── 진단 ─────────────────────────
@@ -1466,8 +1943,13 @@ if __name__ == "__main__":
     if "--diag" in sys.argv:
         diagnose()
     else:
+        demo = "--demo" in sys.argv
+        if not demo and already_running():
+            sys.exit()
+        if not demo and autostart_on():
+            set_autostart(True)   # exe를 다른 폴더로 옮겼어도 자동 실행이 끊기지 않게
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
         SCALE = user32.GetDpiForSystem() / 96
         root = tk.Tk()
-        NagWidget(root, DemoSource() if "--demo" in sys.argv else KakaoSource())
+        NagWidget(root, DemoSource() if demo else KakaoSource())
         root.mainloop()

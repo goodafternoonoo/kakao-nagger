@@ -12,11 +12,10 @@
 Ctrl+Alt+K로 위젯을 완전히 숨기거나 다시 보임. '내대사.txt'에 쓴 대사는 말투 '내 대사'에서 나옴.
 설정의 '거르기'로 이름·메시지 문구에 따라 방을 숨기거나 그 방만 볼 수 있음. 메시지 문구를 넣었을 때만 미리보기를 글자로 읽음.
 """
-import sys, os, re, csv, json, math, time, random, shutil, sqlite3, struct, tempfile, subprocess, threading, winreg
+import sys, os, re, io, csv, json, math, base64, time, random, shutil, sqlite3, struct, tempfile, subprocess, threading, winreg
 import ctypes
 from ctypes import wintypes as wt
 import tkinter as tk
-import tkinter.font
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -1097,7 +1096,7 @@ def render_panel(items, more, hover, title="답장 독촉방", foot=None):
         text, key = foot
         box = (m + px(10), m + total - px(36), m + w - px(10), m + total - px(8))
         fill_round(img, box, px(9), (255, 255, 255), 200 if hover == key else 110)
-        put_text(img, (m + w // 2, (box[1] + box[3]) // 2), clip(text, font(11.5), box[2] - box[0] - px(16)), INK, "mm", font(11.5))
+        put_text(img, (m + w // 2, (box[1] + box[3]) // 2), clip(text, font(11.5), px(FOOT_TEXT_W)), INK, "mm", font(11.5))
         hits.append(box + (key,))
     return img, hits
 
@@ -1109,6 +1108,10 @@ def clip(text, f, width):
     while text and text_w(f, text + "…") > width:
         text = text[:-1]
     return text + "…"
+
+
+TONE_SAMPLE_W = PANEL_W - 64    # 말투 예시 줄 폭 (오른쪽 체크 표시 자리 뺌)
+FOOT_TEXT_W = PANEL_W - 36      # 위젯 맨 아래 줄 글자 폭
 
 
 def render_tones(current, hover, hotkey_ok=True):
@@ -1135,7 +1138,7 @@ def render_tones(current, hover, hotkey_ok=True):
         elif hover == "tone:" + key:
             fill_round(img, box, px(11), (255, 255, 255), 130)
         put_text(img, (box[0] + px(12), y + px(14)), label, INK, "lm", font(12.5, True))
-        sample = clip(levels[0][0], font(11), box[2] - box[0] - px(24))
+        sample = clip(levels[0][0], font(11), px(TONE_SAMPLE_W))
         put_text(img, (box[0] + px(12), y + px(30)), sample, INK if key == current else INK_SOFT, "lm", font(11))
         if key == current:
             draw_icon(img, "check", box[2] - px(20), (box[1] + box[3]) // 2, INK)
@@ -1227,6 +1230,26 @@ def render_welcome(hover):
     return img, hits
 
 
+def add_full_text(img, hits, hit, text):
+    """잘린 글자에 마우스를 올렸을 때 왼쪽에 전체 문구 카드를 붙임. 오른쪽 아래 기준이라 위젯은 안 움직임."""
+    m, gap, f = px(MARGIN), px(8), font(12)
+    lines = wrap(text, f, px(240))
+    cw = int(max(text_w(f, l) for l in lines)) + px(24)
+    ch = len(lines) * px(19) + px(18)
+    dx = cw + gap
+    H = max(img.size[1], ch + m * 2)
+    canvas = Image.new("RGBA", (img.size[0] + dx, H), (0, 0, 0, 0))
+    dy = H - img.size[1]
+    canvas.alpha_composite(img, (dx, dy))
+    y = min(max(next(h for h in hits if h[4] == hit)[1] + dy, m), H - m - ch)
+    box = (m, y, m + cw, y + ch)
+    drop_shadow(canvas, box, px(12))
+    fill_round(canvas, box, px(12), (255, 255, 255))
+    for i, line in enumerate(lines):
+        put_text(canvas, (m + px(12), y + px(9) + px(19) * i + px(9)), line, INK, "lm", f)
+    return canvas, [(a + dx, b + dy, c + dx, d + dy, n) for a, b, c, d, n in hits]
+
+
 def add_preview(img, hits, name, count, crop):
     """줄에 마우스를 올렸을 때 카톡방 왼쪽에 미리보기 카드를 붙임. 줄이 움직이지 않게 위아래 배치는 그대로 둠."""
     m, gap = px(MARGIN), px(8)
@@ -1259,7 +1282,9 @@ def render_handle(count, label, warn, hover, quiet=False):
     m, s = px(MARGIN), px(HANDLE_SIZE)
     f = font(12)
     open_ = bool(warn or hover)
-    tw = int(text_w(f, label)) + px(26) if open_ and label else 0
+    tips = {"quit": "위젯 끄기", "settings": "설정"}
+    shown = [label] + list(tips.values()) if hover else [label]   # 버튼 설명으로 바뀌어도 폭이 안 변하게
+    tw = math.ceil(max(text_w(f, t) for t in shown)) + px(26) if open_ and label else 0
     qw = px(60) if hover else 0
     img = Image.new("RGBA", (tw + qw + s + m * 2, s + m * 2), (0, 0, 0, 0))
     W = img.size[0] - m
@@ -1293,8 +1318,7 @@ def render_handle(count, label, warn, hover, quiet=False):
         draw_icon(img, "all", W - px(9), m + px(9), (255, 255, 255))
     hits = [(W - s, m, W, m + s, "handle")]
     if tw:
-        tip = {"quit": "위젯 끄기", "settings": "설정"}.get(hover, label)
-        put_text(img, (m + qw + px(14), cy), clip(tip, f, tw - px(26)), INK, "lm", f)
+        put_text(img, (m + qw + px(14), cy), tips.get(hover, label), INK, "lm", f)
         hits.append((m + qw, m, W - s, m + s, "handle"))
     if qw:
         for i, key in enumerate(("quit", "settings")):
@@ -1335,17 +1359,146 @@ def watch_hotkey(pressed, failed):
             pressed.set()
 
 
+FILTER_W = 420
+FILTER_TABS = (("hide", "숨기기", "문구가 들어간 방은 위젯에 안 나와요."),
+               ("only", "이것만 보기", "하나라도 넣으면 맞는 방만 나와요. 숨기기 규칙이 먼저예요."))
+FILTER_SLOTS = (("name", "이름에 이 문구가 있으면"), ("text", "메시지에 이 문구가 있으면"))
+FIELD_BG, CHIP_BG = (241, 244, 247), (228, 235, 242)
+SOFT_GREEN = (30, 123, 52)
+
+
+def render_filters(filters, tab, rooms, hover, focus=None):
+    """거르기 창 그림 → (그림, 누를 곳, 입력칸 자리 {name, text}, 잘린 글자의 전체 문구 {누를 곳: 글자})"""
+    W, pad = px(FILTER_W), px(14)
+    cw = W - pad * 2
+    img = Image.new("RGBA", (W, px(1600)), CHAT_BG + (255,))
+    hits, fields, tips = [], {}, {}
+    y = px(12)
+    # 탭
+    fill_round(img, (pad, y, W - pad, y + px(38)), px(12), (255, 255, 255), 90)
+    half = cw // 2
+    for i, (key, label, _) in enumerate(FILTER_TABS):
+        box = (pad + half * i + px(3), y + px(3), pad + half * (i + 1) - px(3), y + px(35))
+        if key == tab:
+            fill_round(img, box, px(10), (255, 255, 255))
+        elif hover == "tab:" + key:
+            fill_round(img, box, px(10), (255, 255, 255), 90)
+        count = len(filters[key + "_name"]) + len(filters[key + "_text"])
+        f = font(13, True)
+        total = text_w(f, label) + (px(24) if count else 0)
+        cx = (box[0] + box[2]) // 2 - int(total / 2)
+        cy = (box[1] + box[3]) // 2
+        put_text(img, (cx, cy), label, INK if key == tab else INK_SOFT, "lm", f)
+        if count:
+            px0 = cx + int(text_w(f, label)) + px(6)
+            fill_round(img, (px0, cy - px(9), px0 + px(18), cy + px(9)), px(9), LEVEL_STYLE[1][0] if key == tab else (255, 255, 255))
+            put_text(img, (px0 + px(9), cy), str(count), INK, "mm", font(10.5, True))
+        hits.append(box + ("tab:" + key,))
+    y += px(38) + px(9)
+    desc = next(d for k, _, d in FILTER_TABS if k == tab)
+    put_text(img, (pad + px(4), y + px(9)), desc, INK_SOFT, "lm", font(12))
+    y += px(18) + px(9)
+    # 문구 카드 둘
+    inner_x, inner_w = pad + px(14), cw - px(28)
+    chip_h, chip_gap = px(26), px(5)
+    f_chip = font(12)
+    for slot, title in FILTER_SLOTS:
+        key = f"{tab}_{slot}"
+        placed, cx, cy = [], 0, 0
+        for i, word in enumerate(filters[key]):
+            shown = clip(word, f_chip, inner_w - px(44))
+            width = int(text_w(f_chip, shown)) + px(38)
+            if cx and cx + width > inner_w:
+                cx, cy = 0, cy + chip_h + chip_gap
+            placed.append((i, word, shown, cx, cy, width))
+            cx += width + chip_gap
+        chips_h = cy + chip_h + px(10) if placed else 0
+        note = wrap("목록에 보이는 최근 메시지만 확인해요. 사진·이모티콘은 못 읽어요.", font(11), inner_w) if slot == "text" else []
+        height = px(12) + px(18) + px(8) + px(34) + px(10) + chips_h + (len(note) * px(16) + px(6) if note else 0) + px(4)
+        card = (pad, y, W - pad, y + height)
+        fill_round(img, card, px(14), (255, 255, 255))
+        put_text(img, (inner_x, y + px(21)), title, INK, "lm", font(12.5, True))
+        fy = y + px(38)
+        add_w = px(58)
+        field = (inner_x, fy, inner_x + inner_w - add_w - px(6), fy + px(34))
+        if focus == slot:
+            fill_round(img, (field[0] - px(1), field[1] - px(1), field[2] + px(1), field[3] + px(1)), px(10), (110, 130, 150))
+        fill_round(img, field, px(9), FIELD_BG)
+        fields[slot] = field
+        add = (field[2] + px(6), fy, inner_x + inner_w, fy + px(34))
+        fill_round(img, add, px(9), LEVEL_STYLE[1][0] if hover == "add:" + key else (255, 236, 90))
+        put_text(img, ((add[0] + add[2]) // 2, fy + px(17)), "추가", INK, "mm", font(12.5, True))
+        hits.append(add + ("add:" + key,))
+        top = fy + px(34) + px(10)
+        for i, word, shown, cx, cy, width in placed:
+            chip = (inner_x + cx, top + cy, inner_x + cx + width, top + cy + chip_h)
+            fill_round(img, chip, px(8), CHIP_BG)
+            put_text(img, (chip[0] + px(10), (chip[1] + chip[3]) // 2), shown, INK, "lm", f_chip)
+            x_box = (chip[2] - px(25), chip[1], chip[2], chip[3])
+            del_key = f"del:{key}:{i}"
+            if hover == del_key:
+                fill_round(img, (x_box[0] + px(2), chip[1] + px(3), x_box[2] - px(3), chip[3] - px(3)), px(6), (40, 60, 80), 40)
+            draw_icon(img, "quit", (x_box[0] + x_box[2]) // 2, (chip[1] + chip[3]) // 2, INK if hover == del_key else INK_SOFT)
+            hits.append(x_box + (del_key,))
+            if shown != word:
+                tips[f"chip:{key}:{i}"] = word
+                hits.append(chip + (f"chip:{key}:{i}",))
+        ny = top + chips_h
+        for line in note:
+            put_text(img, (inner_x, ny + px(8)), line, INK_SOFT, "lm", font(11))
+            ny += px(16)
+        y += height + px(10)
+    # 지금 안 읽은 방
+    shown_rooms = rooms[:6]
+    rows = max(len(shown_rooms), 1) + (1 if len(rooms) > 6 else 0)
+    height = px(12) + px(18) + px(6) + rows * px(28) + px(8)
+    fill_round(img, (pad, y, W - pad, y + height), px(14), (255, 255, 255))
+    put_text(img, (inner_x, y + px(21)), "지금 안 읽은 방", INK, "lm", font(12.5, True))
+    ry = y + px(36)
+    if not rooms:
+        put_text(img, (inner_x, ry + px(14)), "지금은 안 읽은 1:1 방이 없어요.", INK_SOFT, "lm", font(12))
+    for i, (name, why) in enumerate(shown_rooms):
+        cy = ry + px(28) * i + px(14)
+        status = f"숨김 · {why}" if why else "보임"
+        f_st = font(11)
+        st_shown = clip(status, f_st, px(200))
+        st_w = int(text_w(f_st, st_shown)) + px(16)
+        pill = (inner_x + inner_w - st_w, cy - px(11), inner_x + inner_w, cy + px(11))
+        fill_round(img, pill, px(8), CHIP_BG if why else (222, 243, 214))
+        put_text(img, ((pill[0] + pill[2]) // 2, cy), st_shown, INK_SOFT if why else SOFT_GREEN, "mm", f_st)
+        name_shown = clip(name, font(12.5), pill[0] - inner_x - px(10))
+        put_text(img, (inner_x, cy), name_shown, INK_SOFT if why else INK, "lm", font(12.5))
+        if name_shown != name or st_shown != status:
+            tips[f"room:{i}"] = f"{name}\n{status}"
+            hits.append((inner_x, cy - px(13), inner_x + inner_w, cy + px(13), f"room:{i}"))
+    if len(rooms) > 6:
+        put_text(img, (inner_x, ry + px(28) * 6 + px(14)), f"외 {len(rooms) - 6}개", INK_SOFT, "lm", font(12))
+    y += height + px(14)
+    img = img.crop((0, 0, W, y))
+    # 잘린 글자 위에 마우스가 있으면 전체를 보여 줌
+    if hover in tips:
+        box = next(h for h in hits if h[4] == hover)
+        lines = [l for part in tips[hover].split("\n") for l in wrap(part, font(12), cw - px(36))]
+        th = len(lines) * px(19) + px(16)
+        tw_ = int(max(text_w(font(12), l) for l in lines)) + px(24)
+        tx = min(box[0], W - pad - tw_)
+        ty = box[3] + px(4) if box[3] + px(4) + th <= y - px(4) else box[1] - px(4) - th
+        fill_round(img, (tx, ty, tx + tw_, ty + th), px(9), (44, 58, 72))
+        for i, line in enumerate(lines):
+            put_text(img, (tx + px(12), ty + px(8) + px(19) * i + px(9)), line, (255, 255, 255), "lm", font(12))
+    return img, hits, fields, tips
+
+
 class FilterWindow:
-    """거르기 규칙 창. 글자를 쳐야 해서 위젯 그림이 아니라 보통 창으로 띄움. 바꾸면 바로 적용됨."""
-    GROUPS = (("숨기기", "이 문구가 들어가면 위젯에 안 나와요.", (("hide_name", "이름"), ("hide_text", "메시지"))),
-              ("이것만 보기", "하나라도 넣으면 여기 맞는 방만 나와요. 비워 두면 전부 나와요.", (("only_name", "이름"), ("only_text", "메시지"))))
-    SOFT, LINE, CHIP, ACCENT = "#5A6B7B", "#D5DCE3", "#EEF2F6", "#FEE500"
+    """거르기 규칙 창. 글자를 쳐야 해서 보통 창에 띄우되, 입력칸만 실제 부품이고 나머지는 위젯처럼 그림으로 그림. 바꾸면 바로 적용됨."""
 
     def __init__(self, widget):
         self.widget = widget
+        self.tab, self.hover, self.focus = "hide", None, "name"
+        self.hits, self.tips, self.photo, self.size = [], {}, None, None
+        self.room_sig = None
         self.win = win = tk.Toplevel(widget.root)
         win.title("거르기")
-        win.configure(bg="white", padx=px(20), pady=px(14))
         win.resizable(False, False)
         win.attributes("-topmost", True)
         win.protocol("WM_DELETE_WINDOW", self.close)
@@ -1354,47 +1507,91 @@ class FilterWindow:
             win.iconbitmap(icon)
         except tk.TclError:
             pass
-        self.f = ("맑은 고딕", -px(13))
-        self.f_small = ("맑은 고딕", -px(12))
-        self.f_bold = ("맑은 고딕", -px(15), "bold")
-        self.entries, self.chips = {}, {}
-        for no, (title, desc, keys) in enumerate(self.GROUPS):
-            tk.Label(win, text=title, font=self.f_bold, bg="white", anchor="w").pack(fill="x", pady=(px(14) if no else 0, 0))
-            tk.Label(win, text=desc, font=self.f_small, fg=self.SOFT, bg="white", anchor="w").pack(fill="x", pady=(0, px(6)))
-            for key, label in keys:
-                self.add_row(key, label)
-        tk.Frame(win, bg=self.LINE, height=1).pack(fill="x", pady=(px(12), px(10)))
-        tk.Label(win, text="지금 안 읽은 방", font=self.f_bold, bg="white", anchor="w").pack(fill="x")
-        self.rooms = tk.Frame(win, bg="white")
-        self.rooms.pack(fill="x", pady=(px(4), px(8)))
-        tk.Label(win, text="메시지는 카톡 목록에 보이는 최근 메시지만 확인해요. 사진·이모티콘은 못 읽을 수 있어요.",
-                 font=self.f_small, fg=self.SOFT, bg="white", anchor="w").pack(fill="x")
-        self.room_sig = None
-        self.redraw()
-        self.show_rooms()
-        win.update_idletasks()
-        win.geometry(f"+{(win.winfo_screenwidth() - win.winfo_reqwidth()) // 2}+{(win.winfo_screenheight() - win.winfo_reqheight()) // 3}")
+        self.pic = tk.Label(win, bd=0, highlightthickness=0, bg="#%02x%02x%02x" % CHAT_BG)
+        self.pic.place(x=0, y=0)
+        self.pic.bind("<Motion>", self.on_move)
+        self.pic.bind("<Leave>", lambda e: self.set_hover(None))
+        self.pic.bind("<Button-1>", self.on_click)
+        self.entries = {}
+        for slot, _ in FILTER_SLOTS:
+            entry = tk.Entry(win, font=("맑은 고딕", -px(13)), relief="flat", bd=0, highlightthickness=0,
+                             bg="#%02x%02x%02x" % FIELD_BG, fg="#%02x%02x%02x" % INK, insertbackground="#%02x%02x%02x" % INK)
+            entry.bind("<Return>", lambda e, s=slot: self.add_word(f"{self.tab}_{s}"))
+            entry.bind("<FocusIn>", lambda e, s=slot: self.set_focus(s))
+            entry.bind("<FocusOut>", lambda e, s=slot: self.set_focus(None, s))
+            self.entries[slot] = entry
+        self.rooms = self.current_rooms()
+        self.room_sig = self.rooms
+        self.draw()
+        win.geometry(f"+{(win.winfo_screenwidth() - self.size[0]) // 2}+{(win.winfo_screenheight() - self.size[1]) // 3}")
         win.update()
-        user32.SetForegroundWindow(user32.GetAncestor(win.winfo_id(), 2))   # 위젯은 포커스를 안 받으니 이 창을 바로 칠 수 있게 올림
+        top = user32.GetAncestor(win.winfo_id(), 2)
+        color = wt.DWORD(CHAT_BG[0] | CHAT_BG[1] << 8 | CHAT_BG[2] << 16)
+        for attr in (34, 35):   # 제목 줄과 테두리를 위젯 바탕색으로. 윈도우 11에서만 먹고 10에선 그대로
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(wt.HWND(top), attr, ctypes.byref(color), 4)
+        user32.SetForegroundWindow(top)   # 위젯은 포커스를 안 받으니 이 창을 바로 칠 수 있게 올림
         win.focus_force()
-        self.entries["hide_name"].focus_set()
+        self.entries["name"].focus_set()
 
-    def add_row(self, key, label):
-        row = tk.Frame(self.win, bg="white")
-        row.pack(fill="x", pady=px(2))
-        tk.Label(row, text=label, font=self.f, bg="white", width=6, anchor="w").pack(side="left")
-        add = tk.Label(row, text="추가", font=self.f, bg=self.ACCENT, padx=px(12), pady=px(3), cursor="hand2")
-        add.pack(side="right", padx=(px(6), 0))
-        add.bind("<Button-1>", lambda e: self.add_word(key))
-        entry = tk.Entry(row, font=self.f, relief="solid", bd=1, highlightthickness=0, width=34)
-        entry.pack(side="left", fill="x", expand=True, ipady=px(3))
-        entry.bind("<Return>", lambda e: self.add_word(key))
-        chips = tk.Frame(self.win, bg="white")
-        chips.pack(fill="x", padx=(px(52), 0))
-        self.entries[key], self.chips[key] = entry, chips
+    def current_rooms(self):
+        return [(n, self.widget.filtered.get(n)) for n in sorted(self.widget.raw)]
+
+    def draw(self):
+        img, self.hits, fields, self.tips = render_filters(self.widget.filters, self.tab, self.rooms, self.hover, self.focus)
+        buf = io.BytesIO()
+        img.convert("RGB").save(buf, "PNG", compress_level=1)
+        self.photo = tk.PhotoImage(data=base64.b64encode(buf.getvalue()))
+        self.pic.configure(image=self.photo)
+        if img.size != self.size:
+            self.size = img.size
+            self.win.geometry(f"{img.size[0]}x{img.size[1]}")
+        for slot, (x0, y0, x1, y1) in fields.items():
+            self.entries[slot].place(x=x0 + px(11), y=y0 + px(6), width=x1 - x0 - px(22), height=y1 - y0 - px(12))
+
+    def hit_at(self, x, y):
+        for x0, y0, x1, y1, name in self.hits:
+            if x0 <= x < x1 and y0 <= y < y1:
+                return name
+        return None
+
+    def set_hover(self, name):
+        if name != self.hover:
+            self.hover = name
+            clickable = name and not name.startswith(("chip:", "room:"))
+            self.pic.configure(cursor="hand2" if clickable else "")
+            self.draw()
+
+    def set_focus(self, slot, leaving=None):
+        if leaving is None or self.focus == leaving:
+            self.focus = slot
+            self.draw()
+
+    def on_move(self, e):
+        self.set_hover(self.hit_at(e.x, e.y))
+
+    def on_click(self, e):
+        hit = self.hit_at(e.x, e.y)
+        if not hit:
+            return
+        kind, _, rest = hit.partition(":")
+        if kind == "tab":
+            self.set_tab(rest)
+        elif kind == "add":
+            self.add_word(rest)
+        elif kind == "del":
+            key, _, i = rest.partition(":")
+            self.remove_word(key, self.widget.filters[key][int(i)])
+
+    def set_tab(self, tab):
+        self.tab = tab
+        for entry in self.entries.values():
+            entry.delete(0, "end")
+        self.hover = None
+        self.draw()
+        self.entries["name"].focus_set()
 
     def add_word(self, key):
-        entry = self.entries[key]
+        entry = self.entries[key.split("_")[1]]
         # 한글 조합 중에 '추가'를 누르면 마지막 글자가 아직 칸에 안 들어와 있음
         hwnd = user32.GetFocus()
         himc = imm32.ImmGetContext(hwnd)
@@ -1412,48 +1609,20 @@ class FilterWindow:
 
     def remove_word(self, key, word):
         self.widget.filters[key].remove(word)
+        self.hover = None
         self.widget.apply_filters()
 
     def redraw(self):
-        """문구 칩을 다시 그림. 칸 폭을 넘으면 다음 줄로."""
-        limit = self.entries["hide_name"].winfo_reqwidth() + px(50)
-        measure = tk.font.Font(font=self.f).measure
-        for key, frame in self.chips.items():
-            for child in frame.winfo_children():
-                child.destroy()
-            row, used = None, 0
-            for word in self.widget.filters[key]:
-                width = measure(word) + px(44)
-                if row is None or used + width > limit:
-                    row, used = tk.Frame(frame, bg="white"), 0
-                    row.pack(anchor="w", pady=(px(3), 0))
-                used += width
-                chip = tk.Frame(row, bg=self.CHIP)
-                chip.pack(side="left", padx=(0, px(4)))
-                tk.Label(chip, text=word, font=self.f_small, bg=self.CHIP, padx=px(6), pady=px(2)).pack(side="left")
-                x = tk.Label(chip, text="✕", font=self.f_small, fg=self.SOFT, bg=self.CHIP, padx=px(5), cursor="hand2")
-                x.pack(side="left")
-                x.bind("<Button-1>", lambda e, k=key, w=word: self.remove_word(k, w))
-        self.room_sig = None
+        self.rooms = self.current_rooms()
+        self.room_sig = self.rooms
+        self.draw()
 
     def show_rooms(self):
         """지금 안 읽은 방이 규칙에 따라 어떻게 되는지 바로 보여 줌."""
-        rooms = [(n, self.widget.filtered.get(n)) for n in sorted(self.widget.raw)]
-        if rooms == self.room_sig:
-            return
-        self.room_sig = rooms
-        for child in self.rooms.winfo_children():
-            child.destroy()
-        if not rooms:
-            tk.Label(self.rooms, text="지금 안 읽은 1:1 방이 없어요.", font=self.f_small, fg=self.SOFT, bg="white", anchor="w").pack(fill="x")
-        for name, why in rooms[:6]:
-            row = tk.Frame(self.rooms, bg="white")
-            row.pack(fill="x")
-            tk.Label(row, text=name, font=self.f, fg=self.SOFT if why else "black", bg="white", anchor="w").pack(side="left")
-            tk.Label(row, text=f"숨김 · {why}" if why else "보임", font=self.f_small, fg=self.SOFT if why else "#1E7B34",
-                     bg="white", anchor="e").pack(side="right")
-        if len(rooms) > 6:
-            tk.Label(self.rooms, text=f"외 {len(rooms) - 6}개", font=self.f_small, fg=self.SOFT, bg="white", anchor="w").pack(fill="x")
+        rooms = self.current_rooms()
+        if rooms != self.room_sig:
+            self.rooms = self.room_sig = rooms
+            self.draw()
 
     def close(self):
         self.win.destroy()
@@ -1607,7 +1776,12 @@ class NagWidget:
         if self.screen == "welcome":
             return render_welcome(self.hover)
         if self.screen == "tones":
-            return render_tones(self.tone, self.hover, not self.hotkey_failed.is_set())
+            img, hits = render_tones(self.tone, self.hover, not self.hotkey_failed.is_set())
+            if self.hover and self.hover.startswith("tone:"):
+                full = TONE_LINES[self.hover[5:]][0][0]
+                if clip(full, font(11), px(TONE_SAMPLE_W)) != full:
+                    return add_full_text(img, hits, self.hover, full)
+            return img, hits
         if self.screen == "settings":
             rules = sum(len(self.filters[k]) for k in FILTER_KEYS)
             note = f"규칙 {rules}개 · 지금 숨긴 방 {len(self.filtered)}개" if rules else "이름이나 메시지로 방을 숨기거나 골라 봐요"
@@ -1643,6 +1817,8 @@ class NagWidget:
                 it["style"] = 0
             items.append(it)
         img, hits = render_panel(items, max(0, len(names) - MAX_BUBBLES), self.hover, "확인할 메시지" if mild else "답장 독촉방", foot)
+        if foot and self.hover == foot[1] and clip(foot[0], font(11.5), px(FOOT_TEXT_W)) != foot[0]:
+            return add_full_text(img, hits, foot[1], foot[0])
         target = self.hover.split(":", 1)[1] if self.hover and self.hover.startswith(("row:", "snooze:", "hide:")) else None
         crop = getattr(self.source, "previews", {}).get(target)
         if crop is not None and target in names[:MAX_BUBBLES]:

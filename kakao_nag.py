@@ -8,6 +8,7 @@
 
 카톡 창은 다른 창에 가려져도 되지만, 최소화하거나 닫으면 못 읽음(위젯에 그렇게 표시됨).
 채팅 목록에 보이는 줄만 읽으니, 창을 길게 두거나 '안읽음' 탭에 두면 빠짐없이 읽음.
+한 번 잡은 방은 스크롤 등으로 안 보여도 읽은 게 확인될 때까지 기억함.
 자동 답장은 하지 않고 평소엔 화면을 '읽기'만 함. 위젯에서 사람을 직접 누를 때만 그 채팅방을 엶(읽음 처리됨).
 Ctrl+Alt+K로 위젯을 완전히 숨기거나 다시 보임. '내대사.txt'에 쓴 대사는 말투 '내 대사'에서 나옴.
 설정의 '거르기'로 이름·메시지 문구에 따라 방을 숨기거나 그 방만 볼 수 있음. 메시지 문구를 넣었을 때만 미리보기를 글자로 읽음.
@@ -708,7 +709,33 @@ def pick_rooms(rows, mentioned):
     return out
 
 
-def read_kakao(need_text=False, mentioned=None):
+def list_complete(img):
+    """목록 전체가 창 안에 다 보이는지. 줄이 없거나 마지막 줄 아래에 줄 하나 이상 빈 자리가 있으면 더 내려갈 데가 없음."""
+    rows = find_rows(img)
+    if not rows:
+        return True
+    below = img[rows[-1][1]:, :img.shape[1] - SCROLLBAR_W]
+    return len(below) >= ROW_H and bool((np.abs(below - img[rows[-1][1], 3]).sum(axis=2) <= 12).all())
+
+
+def visible_names(img):
+    """지금 보이는 모든 줄의 이름"""
+    lines = (name_line(img, top, bottom) for top, bottom in find_rows(img))
+    return {read_name(img, line) for line in lines if line}
+
+
+def hold_unseen(rows, known, img):
+    """안읽음 줄에 지난번에 잡은 방 중 화면 밖으로 나간 방을 더해 돌려줌.
+    배지 없이 보이거나 목록이 다 보이는데도 없을 때만 읽은 것으로 침. 안 읽은 줄만 읽고, 빠진 방이 있을 때만 다른 줄 이름도 읽음."""
+    unread = {r["name"] for r in rows}
+    missing = [n for n in known if n not in unread]
+    if not missing or list_complete(img):
+        return rows
+    seen = visible_names(img)
+    return rows + [known[n] for n in missing if n not in seen]
+
+
+def read_kakao(need_text=False, mentioned=None, known=None):
     """→ (안읽음 있는 1:1 방과 태그된 단톡 목록, 상태 문구). 못 읽는 상황이면 '다 읽음'으로 착각하지 않게 상태 문구를 냄."""
     pids = kakao_pids()
     if not pids:
@@ -726,7 +753,12 @@ def read_kakao(need_text=False, mentioned=None):
     img = grab(lst)
     if img is None:
         return [], "카톡 화면을 못 받아왔어요. 곧 다시 해 볼게요"
-    return pick_rooms(scan_rows(img, need_text), set() if mentioned is None else mentioned), ""
+    known = {} if known is None else known
+    rows = hold_unseen(scan_rows(img, need_text), known, img)
+    rooms = pick_rooms(rows, set() if mentioned is None else mentioned)
+    known.clear()
+    known.update((r["name"], r) for r in rooms)
+    return rooms, ""
 
 
 def bring_to_front(hwnd):
@@ -861,6 +893,7 @@ class KakaoSource:
         self.texts = {}
         self.need_text = False   # 메시지 문구로 거를 때만 위젯이 켬
         self.mentioned = set()   # 태그 배지를 본 단톡 (읽을 때까지 기억)
+        self.known = {}          # 지난번에 잡은 방. 화면 밖으로 나가도 읽은 걸로 치지 않으려고 기억
         self.status = ""
         threading.Thread(target=self._loop, daemon=True).start()
 
@@ -868,7 +901,7 @@ class KakaoSource:
         user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))  # 실제 픽셀 크기로 받기
         while True:
             try:
-                rooms, status = read_kakao(self.need_text, self.mentioned)
+                rooms, status = read_kakao(self.need_text, self.mentioned, self.known)
                 self.avatars = {r["name"]: r["photo"] for r in rooms}
                 self.previews = {r["name"]: r["preview"] for r in rooms}
                 self.texts = {r["name"]: r["text"] for r in rooms}
@@ -1868,6 +1901,8 @@ class NagWidget:
             label = f"답장 밀린 사람 {len(names)}명 · 눌러서 펼치기" if names else "밀린 답장 없음"
             if self.filtered and not names:
                 label += f" · 숨긴 방 {len(self.filtered)}개"
+            if not names:
+                label += " · 눌러서 카톡 열기"
             return render_handle(len(names), label, False, self.hover)
         foot = None
         if undoing:
@@ -1982,7 +2017,7 @@ class NagWidget:
                 self.photos[n] = photos[n]
             self.praised.pop(n, None)
         for n in list(self.first_seen):
-            if n not in self.raw:
+            if n not in self.raw and not self.status:   # 못 읽는 동안에는 읽었는지 모름. 기다린 시간을 그대로 둠
                 if n not in was_filtered:   # 숨겨 둔 방을 읽은 건 칭찬할 일이 아님
                     self.praise(n, now)
                 for d in (self.first_seen, self.snoozed, self.lines, self.counts, self.last_shake, self.photos):
@@ -2096,7 +2131,7 @@ class NagWidget:
         elif hit == "handle":
             if self.status == STATUS_SCALE:
                 os.startfile("ms-settings:display")
-            elif self.status:
+            elif self.status or (now >= self.quiet_until and not self.visible_items(now)):
                 self.source.open_kakao()
             self.collapsed = False
             self.quiet_until = 0

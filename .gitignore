@@ -1,0 +1,12 @@
+# 각자의 PC에서 생기는 파일
+settings.json
+내대사.txt
+진단결과.txt
+
+# 빌드 결과 (exe는 Releases에 올림)
+dist/
+build/
+*.spec
+
+__pycache__/
+*.pyc

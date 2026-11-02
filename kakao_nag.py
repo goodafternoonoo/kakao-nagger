@@ -72,6 +72,18 @@ TONES = [
         ["뽕@알, 톡 왔다. 뭔말알?", "마, 답장 안 하는 건 쌈@뽕하지 않다;;;", "(톡 입갤) ?... 답장 안 하나", "뽕@알, 니 얘기 돌던데? 뭔말알?"],
         ["답장해라. 2트. 3트.", "바빴다고? 공@갈치지마;;;", "후드에서 살아남기 제1장: 톡은 바로 읽을 것.", "[속보] 뽕@알 아직도 답장 안 함;;;"],
         ["후드에서 살아남기 제2장: 읽씹해도 답장은 할 것.", "(뽕@알 퇴갤) ?... 잠수 타나;;;", "시@밤쾅!!! 뽕@알 실종 신고 들어간다;;;", "후드에서 살아남기 제3장: 안읽씹하면 소문 난다."]]),
+    ("aegyo", "애교 가득", [  # 단계가 오를수록 웃으면서 무서워짐
+        ["자기야아~ 톡 왔쪄요 ♡", "답장 언제 해쥬꼬야아? 힝", "뿌우... 나 톡 보냈는뎅 왜 안 봐쪄?", "쪼꼼만 봐주면 안 대? 웅? 웅? 웅?", "톡 왔땅! 얼른 읽어조 >_<", "자기 얘기 들었는뎅... 궁금하면 답장해 보든가앙~"],
+        ["힝... 나 삐질 거야. 진짜루 삐질 거야", "아직두 안 읽어쪄? 나 뿔나쪄 뿌웅", "볼 빵빵해지는 중... 터지기 전에 답장해조", "나 지금 손톱 깨물고 이써. 다 자기 때문이야 힝구", "뽀뽀 한 번 깎는다? 지금 답장하면 봐줌", "[속보] 우리 자기, 아직도 답장 안 해쪄 ㅠㅠ"],
+        ["자기야♡ 나 이제 안 웃어. 답장해.", "나 지금 웃고 있는데 눈은 안 웃어 ♡", "자기야아~ 폰 어디 뒀어? 내가 찾아가서 줄까? ♡", "애교 재고 소진됐어. 다음 말투는 욕이야 ♡", "씨잉... 진짜 미워! 미워미워 개미워!!", "뿌우우우... 시부럴 답장 좀 해조오오 ♡"]]),
+    ("community", "커뮤니티", [  # 인터넷 게시판 말투. 특정 집단을 비하하는 표현은 쓰지 않음
+        ["님 톡 옴 ㅅㄱ", "형님들 이거 답장 안 하는 거 실화임?", "톡 왔는데 왜 안 읽음? 3줄 요약 좀", "이거 나만 불편함? 안읽씹 ㅋㅋ", "답장 안 할 사람 개추 ㅋㅋㅋ", "님 얘기 올라옴 ㄷㄷ 궁금하면 답장 ㄱㄱ"],
+        ["10분째 안읽씹 ㄷㄷ 박제각 나옴", "글쓴이 잠수 탐 ㅋㅋㅋ 결말 아시는 분?", "아직도 안 읽은 거 레전드네", "후기 안 올라오는 거 보니 망했나 보네", "[단독] 안읽씹 1타 강사 등장 ㄷㄷ", "제목: 톡 안 읽는 사람. 이거 베스트 간다 ㅋㅋ"],
+        ["안읽씹 1시간 돌파 ㅋㅋㅋㅋ 박제 완료", "이 새끼 아직도 안 읽었냐? 댓글 터졌다 ㅋㅋㅋ", "형 지금 스레드 터졌어. 다 형 얘기임", "이쯤 되면 신상 털림 ㅋㅋ 농담임. 아마도", "응 답장 안 해~ 응 손절이야~", "ㅅㅂ 답장 좀 해라 이 화상아 ㅋㅋㅋ"]]),
+    ("jammin", "잼민이", [
+        ["아저씨 톡 왔는데요?", "톡 왔는데 왜 안 읽어요? 왜요? 왜요? 왜요?", "어쩔티비~ 일단 답장하셈", "님 톡 왔음 ㅋㅋㄹㅃㅃ", "저 초3인데 저도 답장은 바로 하는데요", "님 얘기 들었는데 말 안 해 줄 거임 ㅋㅋㄹㅃㅃ"],
+        ["저쩔냉장고 ㅋㅋ 답장 안 하면 바보 똥멍청이", "선생님한테 이를 거임. 진짜임", "아직도 안 읽음?? 킹받죠? 메롱", "우리 아빠 경찰인데요", "님 몇 살임? 저는 10살인데 톡 바로 읽음", "반사! 무한 반사! 안 읽는 사람 바보!"],
+        ["엄마아아아아!!! 이 사람 톡 안 읽어요!!!", "우리 형 중2임. 부른다?", "으아아앙 답장 안 해 주면 드러누울 거임!!!", "유튜브에 올린다? 구독자 12명임 조심하셈", "님 부모님 전번 뭐임? 일러야겠음", "님 로블록스 친삭함. 되돌릴 수 없음"]]),
     ("custom", "내 대사", [[], [], []]),  # 내대사.txt에서 채움
 ]
 TONE_LINES = {key: levels for key, _, levels in TONES}
@@ -87,6 +99,25 @@ PRAISE_LINES = {
     "mz": ["읽음 인증 완료 ㅇㅈ", "오 이건 좀 킹정", "갓생 한 칸 올라감 ㅋ"],
     "hiphop": ["Aight, respect. You hit 'em back, right?", "Look at you, actin' right.", "W. Took you long enough tho."],
     "hipple": ["뽕@알, 읽었나? 쌈@뽕하다;;;", "후드에서 살아남기 제4장: 답장하는 자가 살아남는다.", "(답장 입갤) 인정;;;"],
+    "aegyo": ["우와아 읽어쪄! 답장두 해쪄? 쪼아쪼아", "역시 우리 자기 ♡ 칭찬 뽀뽀 쪽", "진작 그러지잉~ 이뻐 죽게써"],
+    "community": ["오 읽음 ㅋㅋ 답장 후기 ㄱㄱ", "이건 개추 ㅇㅈ", "갓답장 ㄷㄷ 베스트 보냄"],
+    "jammin": ["오 읽었네요? 참 잘했어요 도장 쾅", "칭찬 스티커 1개 드림. 10개 모으면 아무것도 없음 ㅋㅋㄹㅃㅃ", "ㅇㅈ 님 이제 초등학생 수준임"],
+    "custom": [],
+}
+# 단톡에서 태그됐을 때. 카톡이 @ 아이콘 배지로 알려 주는 방에 씀.
+MENTION_LINES = {
+    "gyeongsang": ["단톡에서 니 부른다 아이가!", "마, 단톡에서 니 찾는다"],
+    "jeolla": ["단톡서 니 찾는당께", "아야, 단톡에서 너 불러부렀어"],
+    "chungcheong": ["단톡에서 찾는디유. 급한 건 아닐 거유", "누가 불렀슈. 단톡이유"],
+    "polite": ["단체 채팅방에서 언급되셨습니다.", "단체방에서 회신을 기다리고 있습니다."],
+    "office": ["단체방에서 나를 불렀어요.", "단체방에 확인할 메시지가 있어요."],
+    "bestie": ["야 단톡에서 너 부름 ㅋㅋ", "단톡에서 너 찾는다 빨리 와"],
+    "mz": ["단톡 소환 당함 ㅋㅋ", "단톡에 @너 떴음 ㄹㅇ"],
+    "hiphop": ["Yo, they @'d you in the group chat.", "Group chat callin' your name, fam."],
+    "hipple": ["(단톡 소환) ?... 뽕@알 나와라;;;", "후드에서 살아남기 제5장: 태그되면 답할 것."],
+    "aegyo": ["단톡에서 자기 찾아용~ 얼른 가봐아", "누가 우리 자기 불러쪄! 나 질투나 힝"],
+    "community": ["단톡에 박제됨 ㅋㅋ 가봐라", "소환 당함 ㄷㄷ 단톡 ㄱㄱ"],
+    "jammin": ["단톡에서 님 불렀는데요? 안 가요? 왜요?", "단톡에서 님 찾음 ㅋㅋㄹㅃㅃ 얼른 가셈"],
     "custom": [],
 }
 SETTINGS_PATH = os.path.join(HERE, "settings.json")
@@ -95,7 +126,8 @@ CUSTOM_MAX = 80     # 대사 한 줄 최대 글자 수 (너무 길면 위젯이 
 CUSTOM_DEFAULT = (("[처음]", ["톡 왔다. 답장해라", "답장 언제 할 건데?"]),
                   ("[10분]", ["아직도 안 읽었네?", "폰 어디 뒀어?"]),
                   ("[1시간]", ["진짜 너무한 거 아니냐", "이제 진짜 화낸다!!"]),
-                  ("[칭찬]", ["오 읽었네! 답장도 했지?"]))
+                  ("[칭찬]", ["오 읽었네! 답장도 했지?"]),
+                  ("[태그]", ["단톡에서 너 불렀어!"]))
 
 
 def load_custom():
@@ -120,6 +152,7 @@ def load_custom():
     lists = [found[sec] or list(lines) for sec, lines in CUSTOM_DEFAULT]
     TONE_LINES["custom"][:] = lists[:3]
     PRAISE_LINES["custom"][:] = lists[3]
+    MENTION_LINES["custom"][:] = lists[4]
 
 
 def open_custom():
@@ -324,6 +357,9 @@ ROW_H, AVATAR_TOP = 70, 13   # 줄 높이, 줄 맨 위에서 프사까지
 NAME_X = (76, 250)      # 이름이 있을 수 있는 가로 범위
 BADGE_X = 250           # 안읽음 배지는 이 x보다 오른쪽 (왼쪽은 미리보기 글자·이모티콘)
 BADGE_COLOR = (255, 122, 107)  # 안읽음 배지 바탕색(실측). 높이 17px
+BADGE_DEEP = (244, 85, 30)     # 같은 배지가 이 진한 색으로도 나옴(실측). 태그 여부와는 상관없음
+BADGE_COLORS = (BADGE_COLOR, BADGE_DEEP)
+MENTION_ICON_W = 10            # 태그 배지 맨 앞의 @ 아이콘은 이 폭 이상. 숫자·+는 더 좁음
 SCROLLBAR_W = 14
 DARK_LUM = 60           # 이름 글자 밝기(실측 25) 상한
 COUNT_COLOR = 0x949494  # 단톡 인원수 글자색(실측, 12px 보통 굵기)
@@ -401,14 +437,14 @@ def find_rows(img):
             if b - t >= 40 and t >= AVATAR_TOP and t - AVATAR_TOP + ROW_H <= len(img)]
 
 
-def is_badge_color(a):
-    return (np.abs(a - BADGE_COLOR) <= 25).all(axis=2)
+def is_badge_color(a, color=BADGE_COLOR):
+    return (np.abs(a - color) <= 25).all(axis=2)
 
 
 def find_badge(img, top, bottom):
-    """줄 오른쪽의 빨간 안읽음 배지 → (x0, y0, x1, y1) 또는 None"""
+    """줄 오른쪽의 안읽음 배지 → (x0, y0, x1, y1) 또는 None"""
     a = img[top:bottom, BADGE_X:img.shape[1] - SCROLLBAR_W]
-    red = is_badge_color(a)
+    red = max((is_badge_color(a, c) for c in BADGE_COLORS), key=lambda m: m.sum())
     if not red.any():
         return None
     ys, xs = runs(red.any(axis=1), merge=1), runs(red.any(axis=0), merge=3)
@@ -567,24 +603,35 @@ def read_name(img, line):
 
 
 def read_count(img, box):
-    """배지 숫자. 못 읽으면 '?'(안읽음인 건 확실함)."""
+    """배지 숫자. 못 읽으면 '?'(안읽음인 건 확실함). 맨 앞에 @ 아이콘이 있으면(단톡 태그) '@1'처럼 돌려줌."""
     x0, y0, x1, y1 = box
     crop = img[y0:y1 + 1, x0:x1 + 1].copy()
+    color = max(BADGE_COLORS, key=lambda c: is_badge_color(crop, c).sum())
     for row in crop:  # 둥근 모서리 바깥의 흰 부분은 글자가 아니니 바탕색으로 덮음
-        xs = np.flatnonzero(is_badge_color(row[None])[0])
-        row[:xs[0] if len(xs) else len(row)] = BADGE_COLOR
+        xs = np.flatnonzero(is_badge_color(row[None], color)[0])
+        row[:xs[0] if len(xs) else len(row)] = color
         if len(xs):
-            row[xs[-1] + 1:] = BADGE_COLOR
+            row[xs[-1] + 1:] = color
     pad = GLYPH_H
-    a = np.full((crop.shape[0] + pad * 2, crop.shape[1] + pad * 2, 3), BADGE_COLOR, np.float32)
+    a = np.full((crop.shape[0] + pad * 2, crop.shape[1] + pad * 2, 3), color, np.float32)
     a[pad:pad + crop.shape[0], pad:pad + crop.shape[1]] = crop
-    ink = (np.abs(a - BADGE_COLOR).sum(axis=2) > 60).any(axis=0)
+    ink = (np.abs(a - color).sum(axis=2) > 60).any(axis=0)
     xs = np.flatnonzero(ink)
     if not len(xs):
         return "?"
-    table = glyph_table("0123456789+", 12, 700, 0xFFFFFF, BADGE_COLOR)
-    text = read_glyphs(a, int(xs[0]), int(xs[-1]), range(pad - 2, pad + 5), [table], ink).replace(" ", "")
-    return text if UNREAD_RE.fullmatch(text) else "?"
+    table = glyph_table("0123456789+", 12, 700, 0xFFFFFF, color)
+    ys = range(pad - 2, pad + 5)
+    text = read_glyphs(a, int(xs[0]), int(xs[-1]), ys, [table], ink).replace(" ", "")
+    if UNREAD_RE.fullmatch(text):     # 숫자로 다 읽히면 보통 배지. 붙어 있는 88이 폭만 보고 @로 잡히지 않게 먼저 봄
+        return text
+    parts = runs(ink)
+    if parts[0][1] - parts[0][0] + 1 < MENTION_ICON_W:
+        return "?"
+    if len(parts) == 1:
+        return "@"
+    # @는 글자가 아니라 아이콘이라 건너뛰고 숫자만 읽음
+    text = read_glyphs(a, parts[1][0], int(xs[-1]), ys, [table], ink).replace(" ", "")
+    return "@" + (text if UNREAD_RE.fullmatch(text) else "")
 
 
 def preview_crop(img, top, bottom, line):
@@ -631,7 +678,8 @@ def scan_rows(img, need_text=False):
         if box and line:
             ax0, ax1 = AVATAR_X
             ay = top + AVATAR_TOP
-            out.append({"name": read_name(img, line), "count": read_count(img, box),
+            count = read_count(img, box)
+            out.append({"name": read_name(img, line), "count": count, "mention": count.startswith("@"),
                         "group": is_group(img, top, line), "photo": img[ay:ay + ax1 - ax0, ax0:ax1],
                         "preview": preview_crop(img, top, bottom, line),
                         "text": read_preview(img, top, bottom, line) if need_text else ""})
@@ -641,8 +689,27 @@ def scan_rows(img, need_text=False):
 STATUS_SCALE = "화면 배율을 100%로 바꿔 주세요 · 눌러서 설정 열기"
 
 
-def read_kakao(need_text=False):
-    """→ (안읽음 있는 1:1 방 목록, 상태 문구). 못 읽는 상황이면 '다 읽음'으로 착각하지 않게 상태 문구를 냄."""
+def pick_rooms(rows, mentioned):
+    """안읽음 줄 중 위젯에 보일 방: 1:1 방과 나를 태그한 단톡.
+    태그 뒤에 메시지가 더 오면 @ 배지가 사라질 수 있어, 한 번 본 방은 안읽음이 없어질 때까지 mentioned에 기억함."""
+    mentioned.intersection_update(r["name"] for r in rows)
+    out = []
+    for r in rows:
+        if not r["name"]:
+            continue
+        if r["mention"]:
+            mentioned.add(r["name"])
+        if r["name"] in mentioned:
+            if not r["count"].startswith("@"):
+                r["count"] = "@" + r["count"].replace("?", "")
+            out.append(r)
+        elif not r["group"]:
+            out.append(r)
+    return out
+
+
+def read_kakao(need_text=False, mentioned=None):
+    """→ (안읽음 있는 1:1 방과 태그된 단톡 목록, 상태 문구). 못 읽는 상황이면 '다 읽음'으로 착각하지 않게 상태 문구를 냄."""
     pids = kakao_pids()
     if not pids:
         return [], "카톡이 꺼져 있어요. 켜면 바로 읽어요"
@@ -659,7 +726,7 @@ def read_kakao(need_text=False):
     img = grab(lst)
     if img is None:
         return [], "카톡 화면을 못 받아왔어요. 곧 다시 해 볼게요"
-    return [r for r in scan_rows(img, need_text) if r["name"] and not r["group"]], ""
+    return pick_rooms(scan_rows(img, need_text), set() if mentioned is None else mentioned), ""
 
 
 def bring_to_front(hwnd):
@@ -793,6 +860,7 @@ class KakaoSource:
         self.previews = {}
         self.texts = {}
         self.need_text = False   # 메시지 문구로 거를 때만 위젯이 켬
+        self.mentioned = set()   # 태그 배지를 본 단톡 (읽을 때까지 기억)
         self.status = ""
         threading.Thread(target=self._loop, daemon=True).start()
 
@@ -800,7 +868,7 @@ class KakaoSource:
         user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))  # 실제 픽셀 크기로 받기
         while True:
             try:
-                rooms, status = read_kakao(self.need_text)
+                rooms, status = read_kakao(self.need_text, self.mentioned)
                 self.avatars = {r["name"]: r["photo"] for r in rooms}
                 self.previews = {r["name"]: r["preview"] for r in rooms}
                 self.texts = {r["name"]: r["text"] for r in rooms}
@@ -826,9 +894,9 @@ class DemoSource:
         pass
 
     def __init__(self):
-        self.result = {"엄마": "3", "김지수": "1", "동네친구 민수": "12"}
-        self.preseed = {"엄마": 75, "김지수": 15, "동네친구 민수": 1}  # 몇 분 전부터
-        self.texts = {"엄마": "밥은 먹었나 전화 좀 받아라", "김지수": "내일 몇 시에 볼까?", "동네친구 민수": "야 이거 봤냐ㅋㅋㅋ"}
+        self.result = {"엄마": "3", "김지수": "1", "동네친구 민수": "12", "우리 팀 단톡": "@1"}
+        self.preseed = {"엄마": 75, "김지수": 15, "동네친구 민수": 1, "우리 팀 단톡": 5}  # 몇 분 전부터
+        self.texts = {"엄마": "밥은 먹었나 전화 좀 받아라", "김지수": "내일 몇 시에 볼까?", "동네친구 민수": "야 이거 봤냐ㅋㅋㅋ", "우리 팀 단톡": "@나 이거 확인 좀"}
         self.previews = {n: self._fake_preview(t) for n, t in self.texts.items()}
 
     @staticmethod
@@ -859,6 +927,7 @@ LEVEL_STYLE = [((255, 255, 255), INK, False), ((254, 229, 0), INK, False), ((232
                ((168, 226, 140), INK, False)]  # 마지막은 칭찬
 AVATAR_COLORS = [(255, 170, 130), (160, 196, 255), (178, 220, 160), (216, 180, 240), (250, 200, 110), (140, 210, 210)]
 PRAISE_STYLE = 3
+MENTION_LEVEL = 4     # next_line에서 태그 대사를 고를 때 쓰는 값
 BUTTONS = [("settings", "설정 · 말투 · 거르기"), ("all", "30분 동안 전부 조용히"), ("collapse", f"작게 접기 · 숨기기는 {HOTKEY_TEXT}"), ("quit", "위젯 끄기")]
 ROW_TIPS = {"row:": "누르면 방이 열리고 읽음 처리돼요", "snooze:": "10분 동안 이 사람만 조용히", "hide:": "이 사람을 위젯에서 숨겨요"}
 _fonts = {}
@@ -1060,7 +1129,7 @@ def render_panel(items, more, hover, title="답장 독촉방", foot=None):
             ctext = str(it["count"])
             cw = max(px(17), int(text_w(font(10, True), ctext)) + px(10))
             pill = (nx + nw + px(6), top, nx + nw + px(6) + cw, top + px(15))
-            fill_round(img, pill, px(8), PILL_RED)
+            fill_round(img, pill, px(8), BADGE_DEEP if ctext.startswith("@") else PILL_RED)
             put_text(img, ((pill[0] + pill[2]) // 2, top + px(7)), ctext, (255, 255, 255), "mm", font(10, True))
         color, ink, bold = LEVEL_STYLE[it.get("style", it["level"])]
         f = f_bold if bold else f_msg
@@ -1255,7 +1324,7 @@ def add_preview(img, hits, name, count, crop):
     m, gap = px(MARGIN), px(8)
     pic = Image.fromarray(crop.astype(np.uint8)).convert("RGBA")
     try:
-        unseen = int(count) - 1
+        unseen = int(count.lstrip("@")) - 1
     except ValueError:
         unseen = 1
     note = f"읽음 처리 안 돼요 · 앞의 {unseen}개는 안 보여요" if unseen > 0 else "읽음 처리 안 돼요"
@@ -1812,7 +1881,7 @@ class NagWidget:
             mins = waited[n]
             level = sum(1 for threshold in LEVEL_MIN[1:] if mins >= threshold)
             it = {"name": n, "count": self.current.get(n, ""), "mins": mins, "level": level,
-                  "line": self.nag_line(n, level, now), "photo": getattr(self.source, "avatars", {}).get(n)}
+                  "line": self.nag_line(n, level, now, str(self.current.get(n, "")).startswith("@")), "photo": getattr(self.source, "avatars", {}).get(n)}
             if mild:
                 it["style"] = 0
             items.append(it)
@@ -1825,11 +1894,12 @@ class NagWidget:
             img, hits = add_preview(img, hits, target, self.current.get(target, ""), crop)
         return img, hits
 
-    def nag_line(self, name, level, now):
-        """대사는 단계가 오르거나 시간이 좀 지나야 바뀜 (자꾸 바뀌면 산만함)"""
+    def nag_line(self, name, level, now, mention=False):
+        """대사는 단계가 오르거나 시간이 좀 지나야 바뀜 (자꾸 바뀌면 산만함). 단톡 태그면 태그 대사."""
+        pick = MENTION_LEVEL if mention else level
         saved = self.lines.get(name)
-        if not saved or saved[0] != level or now - saved[2] > NAG_SEC:
-            saved = (level, self.next_line(level), now)
+        if not saved or saved[0] != pick or now - saved[2] > NAG_SEC:
+            saved = (pick, self.next_line(pick), now)
             self.lines[name] = saved
         return saved[1]
 
@@ -1837,7 +1907,10 @@ class NagWidget:
         """대사를 섞어 두고 하나씩 꺼냄. 다 나오기 전엔 같은 대사가 또 안 나옴."""
         bag = self.bags.get((self.tone, level))
         if not bag:
-            lines = PRAISE_LINES[self.tone] if level == PRAISE_STYLE else TONE_LINES[self.tone][level]
+            if level == MENTION_LEVEL:
+                lines = MENTION_LINES[self.tone]
+            else:
+                lines = PRAISE_LINES[self.tone] if level == PRAISE_STYLE else TONE_LINES[self.tone][level]
             bag = self.bags[(self.tone, level)] = random.sample(lines, len(lines))
         return bag.pop()
 
